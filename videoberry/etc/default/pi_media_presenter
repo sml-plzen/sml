@@ -1,0 +1,10 @@
+# Parameters for ip_media_presenter
+# sourced by /etc/init.d/ip_media_presenter
+#
+
+#
+# This is a POSIX shell fragment
+#
+
+# UNC Path of the directory containing media files to present
+MEDIA_UNC_PATH="//intranet/videos"

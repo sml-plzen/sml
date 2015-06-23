@@ -1,0 +1,69 @@
+#  sml.script - boot splash plugin
+# 
+#  Display scaled and centered logo image on black background.
+
+#-----------------------------------------------------------------------------------------
+
+#------------------------------- Utility functions ---------------------------------------
+
+fun ImageFileName(image_name) {
+    local.logo_filename = image_name;
+
+    if (Window.GetBitsPerPixel() == 4) {
+        local.logo_filename += "16";
+    }
+    local.logo_filename += ".png";
+
+    return local.logo_filename;
+}
+
+fun ScaledImage(image_file_name) {
+    local.image = Image(image_file_name);
+    local.image_ratio  = local.image.GetHeight() / local.image.GetWidth();
+    local.screen_ratio = Window.GetHeight() / Window.GetWidth();
+    local.scale_factor;
+
+    if (local.image_ratio > local.screen_ratio) {
+        # Image ratio is taller than screen ratio, we will match the height
+        local.scale_factor = (Window.GetHeight() * 3) / (local.image.GetHeight() * 4);
+    } else {
+        # Image ratio is wider than screen ratio, we will match the width
+        local.scale_factor = (Window.GetWidth() * 3) / (local.image.GetWidth() * 4);
+    }
+
+    return local.image.Scale(local.image.GetWidth()  * local.scale_factor,
+                             local.image.GetHeight() * local.scale_factor);
+}
+
+#------------------------------- Global setup --------------------------------------------
+
+Window.SetBackgroundTopColor(0, 0, 0);     # from balck ...
+Window.SetBackgroundBottomColor(0, 0, 0);  # ... to balck
+
+logo.image = ScaledImage(ImageFileName("logo"));
+
+logo.sprite = Sprite(logo.image);
+
+#------------------------------- Draw function -------------------------------------------
+
+fun draw_scene() {
+    # Place in the center
+    logo.sprite.SetX((Window.GetWidth()  - logo.image.GetWidth())  / 2);
+    logo.sprite.SetY((Window.GetHeight() - logo.image.GetHeight()) / 2);
+
+    # Place in the foreground
+    logo.sprite.SetZ(1000);
+
+    # Make opaque
+    logo.sprite.SetOpacity(1);
+}
+
+draw_scene();
+
+#------------------------------- Refresh callback ----------------------------------------
+
+#fun refresh_callback() {
+#    draw_scene();
+#}
+
+#Plymouth.SetRefreshFunction(refresh_callback);

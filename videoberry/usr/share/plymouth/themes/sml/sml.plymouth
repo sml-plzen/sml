@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=SML
+Description=A theme that features a centered static logo on a black background.
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/sml
+ScriptFile=/usr/share/plymouth/themes/sml/sml.script

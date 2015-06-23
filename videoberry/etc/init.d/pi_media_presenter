@@ -1,0 +1,27 @@
+#! /bin/sh
+#
+# pi_media_presenter
+#
+# starts pi_media_presenter
+#
+
+PATH=/sbin:/usr/sbin:/bin:/usr/bin
+export PATH
+
+NAME="pi_media_presenter"
+
+[ -r "/etc/default/${NAME}" ] && . "/etc/default/${NAME}"
+
+if [ $# -gt 0 ]; then
+	TTYDEV="$1"
+	[ -c "${TTYDEV}" ] || {
+		TTYDEV="/dev/${TTYDEV}"
+		[ -c "${TTYDEV}" ] || TTYDEV=
+	}
+else
+	TTYDEV=
+fi
+
+[ -n "${TTYDEV}" ] && exec < "${TTYDEV}" > "${TTYDEV}" 2>&1
+
+exec "/usr/local/bin/pi_media_presenter.pl" "${MEDIA_UNC_PATH}"
