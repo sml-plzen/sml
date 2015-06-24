@@ -31,40 +31,92 @@ use constant MOUNT_POINT => '/mnt';
 		$self;
 	}
 
-	sub batch_presenter($) {
-		0;
+	sub can_present($$) {
+		my ($self, $entry) = @_;
+		my $files = $self->get_presentable_files($entry);
+
+		if (defined($files) && @$files > 0) {
+			$$entry{FILES} = $files;
+			1;
+		} else {
+			0;
+		}
 	}
 
-	sub present($@) {
-		my ($self, @files) = @_;
+	sub get_presentable_files($$) {
+		undef;
+	}
+
+	sub present($$) {
+		my ($self, $entry) = @_;
+		my $files = $$entry{FILES};
+		# discard removed files
+		my @files = grep { (-f $_) } @$files;
+
+		# force rescan if there are no files left to present
+		(@files > 0)
+			or return 0;
 
 		unless ($plymouth_deactivated) {
 			$plymouth_deactivated = 1;
 			main::execute(qw(/bin/plymouth deactivate));
 		}
 
-		$self->do_present(@files);
+		$self->do_present(\@files);
 
 		if ($plymouth_deactivated) {
 			$plymouth_deactivated = 0;
 			main::execute(qw(/bin/plymouth reactivate));
 		}
+
+		# no need to rescan if no files were removed
+		(@$files == @files);
 	}
 
-	sub do_present($@) {
+	sub do_present($$) {
+	}
+
+	sub build_extension_map($@) {
+		my ($self, @extensions) = @_;
+		my $extmap = { map { $_ => 1 } @extensions };
+
+		$extmap;
+	}
+
+	sub get_extension($$) {
+		my ($self, $name) = @_;
+
+		$name =~ s/^.+\.([^.]+)$/lc($1)/e
+			or return '';
+
+		$name;
 	}
 }
-
 
 {
 	package VideoPresenter;
 
 	use base qw(Presenter);
 
-	sub do_present($@) {
-		my ($self, @files) = @_;
+	my $extensions = __PACKAGE__->build_extension_map(qw(mp4 m4v mov));
 
-		main::execute(qw(omxplayer), @files);
+	sub get_presentable_files($$) {
+		my ($self, $entry) = @_;
+		my $ext;
+
+		($ext = $self->get_extension($$entry{NAME}))
+			or return undef;
+
+		exists($$extensions{$ext})
+			or return undef;
+
+		[$$entry{PATH}];
+	}
+
+	sub do_present($$) {
+		my ($self, $files) = @_;
+
+		main::execute(qw(omxplayer), @$files);
 	}
 }
 
@@ -72,6 +124,8 @@ use constant MOUNT_POINT => '/mnt';
 	package ImagePresenter;
 
 	use base qw(Presenter);
+
+	my $extensions = __PACKAGE__->build_extension_map(qw(jpg jpeg png));
 
 	sub new($$) {
 		my ($class, $timeout) = @_;
@@ -82,36 +136,57 @@ use constant MOUNT_POINT => '/mnt';
 		$self;
 	}
 
-	sub batch_presenter($) {
-		1;
+	sub get_presentable_files($$) {
+		my ($self, $entry) = @_;
+		my $dir = $$entry{PATH};
+		my $dh;
+
+		opendir($dh, $dir)
+			or return undef;
+
+		my @files;
+		my $file;
+		my $ext;
+		while (defined($file = readdir($dh))) {
+			$file = {
+				NAME => $file,
+				PATH => File::Spec->catfile($dir, $file)
+			};
+
+			# only process plain files
+			(-f $$file{PATH})
+				or next;
+
+			# skip hidden files
+			($$file{NAME} =~ /^\./)
+				and next;
+
+			# skip files without extensions
+			($ext = $self->get_extension($$file{NAME}))
+				or next;
+
+			# skip files we can't present
+			exists($$extensions{$ext})
+				or next;
+
+			push(@files, $file);
+		}
+
+		closedir($dh);
+
+		(@files > 0)
+			or return undef;
+
+		@files = map { $$_{PATH} } sort { $$a{NAME} cmp $$b{NAME} } @files;
+
+		\@files;
 	}
 
-	sub do_present($@) {
-		my ($self, @files) = @_;
+	sub do_present($$) {
+		my ($self, $files) = @_;
 
-		main::execute(qw(fbi -noverbose -nocomments -noedit -autozoom -once -timeout), $$self{TIMEOUT}, @files);
+		main::execute(qw(fbi -noverbose -nocomments -noedit -autozoom -once -timeout), $$self{TIMEOUT}, @$files);
 	}
-}
-
-my %presenters;
-
-{
-	my $video_presenter = VideoPresenter->new();
-	my $image_presenter = ImagePresenter->new(IMAGE_DISPLAY_TIME);
-
-	%presenters = (
-		'mp4' => $video_presenter
-		,
-		'm4v' => $video_presenter
-		,
-		'mov' => $video_presenter
-		,
-		'jpg' => $image_presenter
-		,
-		'jpeg' => $image_presenter
-		,
-		'png' => $image_presenter
-	);
 }
 
 
@@ -289,40 +364,39 @@ sub parse_unc_path($$) {
 	(join('/', @segments[0..3]), File::Spec->catfile($mount_point, @segments[4..$#segments]));
 }
 
-sub get_index($$) {
-	my ($media, $entry) = @_;
+sub filter_played($$) {
+	my ($media, $played) = @_;
 
-	defined($entry)
-		or return 0;
+	if (defined($played)) {
+		my @media;
+		my %played;
+		my $name;
 
-	my $name = $$entry{NAME};
+		@media = map {
+			$name = $$_{NAME};
+			if (exists($$played{$name})) {
+				$played{$name} = $_;
+				();
+			} else {
+				$_;
+			}
+		} @$media;
 
-	my $l = 0;
-	my $h = @$media;
-	my $i;
-	my $c;
-	while (1) {
-		$i = int(($l + $h) / 2);
-		$c = $name cmp $$media[$i]{NAME};
-
-		if ($c < 0) {
-			$h = $i;
-			return $l unless $l < $h;
-		} elsif ($c > 0) {
-			$l = $i + 1;
-			return $h unless $l < $h;
-		} else {
-			return $i;
-		}
+		(\@media, \%played);
+	} else {
+		($media, {});
 	}
 }
 
-sub get_current($$) {
-	my ($media, $index_ref) = @_;
+sub shuffle($) {
+	my ($array) = @_;
+	my $i = @$array;
+	my $j;
 
-	$$index_ref < @$media
-		or $$index_ref = 0;
-	@$media[$$index_ref];
+	while ($i > 1) {
+		$j = int(rand($i--));
+		@$array[$i, $j] = @$array[$j, $i];
+	}
 }
 
 my $child;
@@ -390,6 +464,9 @@ my $unc_path = $ARGV[0];
 my $mount_point = MOUNT_POINT;
 my ($share, $media_dir) = parse_unc_path($unc_path, $mount_point);
 
+my $video_presenter = VideoPresenter->new();
+my $image_presenter = ImagePresenter->new(IMAGE_DISPLAY_TIME);
+
 Authen::Krb5::init_context();
 
 my $kt = Authen::Krb5::kt_default();
@@ -397,8 +474,8 @@ my $cc = Authen::Krb5::cc_default();
 my $principal;
 
 my $media;
+my $played;
 my $last_scan;
-my $index;
 my $current;
 
 while (1) {
@@ -429,30 +506,30 @@ while (1) {
 
 		my @media;
 		my $entry;
-		my $ext;
+		my $presenter;
 		while (defined($entry = readdir($dh))) {
 			$entry = {
 				NAME => $entry,
 				PATH => File::Spec->catfile($media_dir, $entry)
 			};
 
-			# only process plain files
-			(-f $$entry{PATH})
-				or next;
-
-			# skip hidden files
+			# skip hidden files and directories
 			($$entry{NAME} =~ /^\./)
 				and next;
 
-			# skip files without extensions
-			($ext = $$entry{NAME}) =~ s/^.+\.([^.]+)$/lc($1)/e
+			if (-f $$entry{PATH}) {
+				$presenter = $video_presenter;
+			} elsif (-d $$entry{PATH}) {
+				$presenter = $image_presenter;
+			} else {
+				next;
+			}
+
+			# skip files and/or directories we can't present
+			$presenter->can_present($entry)
 				or next;
 
-			# skip files we can't present
-			exists($presenters{$ext})
-				or next;
-
-			$$entry{PRESENTER} = $presenters{$ext};
+			$$entry{PRESENTER} = $presenter;
 
 			push(@media, $entry);
 		}
@@ -460,48 +537,31 @@ while (1) {
 		closedir($dh);
 
 		(@media > 0)
-			or log_and_wait(MEDIA_RESCAN_TIME, 'No media files found in: ', $unc_path), next;
+			or log_and_wait(MEDIA_RESCAN_TIME, 'No presentable media files found in: ', $unc_path), next;
 
 		$last_scan = time();
 
-		@media = sort { $$a{NAME} cmp $$b{NAME} } @media;
-		$media = \@media;
-		$index = get_index($media, $current);
-		$current = get_current($media, \$index);
+		# defer already played media
+		($media, $played) = filter_played(\@media, $played);
+
+		shuffle($media);
 	}
 
-	my @batch = ($current);
-	my $presenter = $$current{PRESENTER};
-
-	++$index;
-	$current = get_current($media, \$index);
-	if ($presenter->batch_presenter()) {
-		while ($$current{PRESENTER} == $presenter && $current != $batch[0]) {
-			push(@batch, $current);
-
-			++$index;
-			$current = get_current($media, \$index);
-		}
+	unless (@$media > 0) {
+		push(@$media, delete(@$played{keys(%$played)}));
+		shuffle($media);
+		# avoid playing a single media file twice in a row if possible
+		(defined($current) && $$current{NAME} eq $$media[0]{NAME} && @$media > 1)
+			and @$media[0, 1] = @$media[1, 0];
 	}
 
-	# discard media files which are not present any more
-	@batch = map {
-		$_ = $$_{PATH};
-		unless (-f $_) {
-			# force rescan of media
-			$media = undef;
-			();
-		} else {
-			$_;
-		}
-	} @batch;
+	$current = shift(@$media);
+	$$played{$$current{NAME}} = $current;
 
-	(@batch > 0)
-		and $presenter->present(@batch);
-
-	# force rescan of media if last scan was too long time ago
-	(defined($media) && time() - $last_scan >= MEDIA_RESCAN_TIME)
-		and $media = undef;
+	($$current{PRESENTER}->present($current) && time() - $last_scan < MEDIA_RESCAN_TIME)
+		# force rescan of media if presenter recommends that or last scan was too long
+		# time ago
+		or $media = undef;
 }
 
 END {
