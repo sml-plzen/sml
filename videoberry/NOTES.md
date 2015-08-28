@@ -10,64 +10,17 @@ mount /dev/mapper/loop0p1 /mnt/raspbian/boot
 proot -q 'qemu-arm -cpu arm1176' -S /mnt/raspbian /bin/bash
 ```
 
-#### Kernel
+#### Initrd
 
-Checkout sources:
+Create an initrd image (needs to be done after each kernel update):
 ```shell
-git clone https://github.com/raspberrypi/linux
-cd linux
-git checkout <branch supporting PI v1>
-```
-
-Enable CONFIG_CIFS_UPCALL:
-```diff
---- a/arch/arm/configs/bcmrpi_defconfig
-+++ b/arch/arm/configs/bcmrpi_defconfig
-@@ -1122,6 +1122,7 @@ CONFIG_NFSD_V3_ACL=y
- CONFIG_NFSD_V4=y
- CONFIG_CIFS=m
- CONFIG_CIFS_WEAK_PW_HASH=y
-+CONFIG_CIFS_UPCALL=y
- CONFIG_CIFS_XATTR=y
- CONFIG_CIFS_POSIX=y
- CONFIG_9P_FS=m
- ```
-
-Build the kernel (in the proot emulation environment):
-```shell
-proot -q 'qemu-arm -cpu arm1176' -S /mnt/raspbian /bin/bash
-LANG=en_GB.UTF-8
-make bcmrpi_defconfig
-
-make zImage modules # dtbs
-make modules_install
-```
-
-Mark the kernel as device tree capable:
-```shell
-scripts/mkknlimg arch/arm/boot/zImage kernel.img
-```
-
-Transfer kernel image and modules:
-```shell
-rsync -vrltH --del kernel.img  videoberry:/boot/kernel-<kernel version>.img
-rsync -vrltH --del /lib/modules/<kernel version>/  videoberry:/lib/modules/<kernel version>/
-# rsync -vrltH arch/arm/boot/dts/*.dtb videoberry:/boot/
-# rsync -vrltHarch/arm/boot/dts/overlays/*.dtb* videoberry:/boot/overlays/
-# rsync -vrltH arch/arm/boot/dts/overlays/README videoberry:/boot/overlays/
-```
-
-Prepare the kernel:
-```shell
-depmod -a <kernel version>
 update-initramfs -c -k <kernel version>
-mv /boot/initrd.img-<kernel version> /boot/initramfs-<kernel version>.gz
+mv /boot/initrd.img-<kernel version> /boot/initramfs.gz
 ```
 
-Tell the firmware to boot the kernel by adding the following lines to ```/boot/config.txt```:
+Tell the firmware to use the initrd by adding the following line to ```/boot/config.txt``` (this only needs to be done once):
 ```
-kernel=kernel-<kernel version>.img
-initramfs initramfs-<kernel version>.gz 0x0a000000
+initramfs initramfs.gz 0x0a000000
 ```
 
 #### Samba
@@ -109,7 +62,7 @@ Activate the ```sml``` theme:
 ```shell
 plymouth-set-default-theme sml
 update-initramfs -c -k <kernel version>
-mv /boot/initrd.img-<kernel version> /boot/initramfs-<kernel version>.gz
+mv /boot/initrd.img-<kernel version> /boot/initramfs.gz
 ```
 
 #### Presenter
