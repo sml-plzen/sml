@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8" ?>
 <layouts>
 	<layout name="students">
 		<volume           path="\\intranet.sml.cz\programs"                                       platform="linux" />
@@ -25,6 +25,7 @@
 	<layout name="admin">
 		<include layout="staff" />
 
+		<volume drive="G" path="\\intranet.sml.cz\git"              description="Git" />
 		<volume drive="L" path="\\win-02.sml.cz\netlogon"           description="Netlogon" />
 	</layout>
 
