@@ -1,0 +1,2 @@
+# Allow members of group domain^admins to execute any command
+"%domain^admins" ALL=(ALL:ALL) ALL

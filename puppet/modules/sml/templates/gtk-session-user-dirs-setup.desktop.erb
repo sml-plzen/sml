@@ -1,0 +1,10 @@
+[Desktop Entry]
+Encoding=UTF-8
+Exec=/usr/local/bin/gtk-session-user-dirs-setup.pl <%= scope.function_shellquote([scope.lookupvar('sml::params::volume_root_dir')]) %> <%= scope.function_shellquote([scope.lookupvar('sml::params::remote_home_mirror_dir')]) %> <%= scope.function_shellquote([scope.lookupvar('sml::params::remote_home_mirror_dir_bookmark_name')]) %>
+Name=GTK Session User Directories Setup
+Comment=Updates GTK bookmarks & synchronizes changes in the remote home directory with changes in its local mirror
+Terminal=false
+OnlyShowIn=GNOME;LXDE;Unity;
+Type=Application
+StartupNotify=false
+NoDisplay=true

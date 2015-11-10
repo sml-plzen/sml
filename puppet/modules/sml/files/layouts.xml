@@ -1,0 +1,52 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<layouts>
+	<layout name="students">
+		<volume           path="\\intranet.sml.cz\programs"                                       platform="linux" />
+		<volume drive="N" path="\\intranet.sml.cz\programs_linux"   description="Programy"        platform="linux" />
+		<volume drive="N" path="\\intranet.sml.cz\programs_windows" description="Programy"        platform="windows" />
+		<volume drive="S" path="\\intranet.sml.cz\public_students"  description="Public_Students" />
+	</layout>
+
+	<layout name="staff-basic">
+		<volume drive="T" path="\\intranet.sml.cz\public_teachers"  description="Public_Teachers" />
+	</layout>
+
+	<layout name="staff">
+		<include layout="students" />
+		<include layout="staff-basic" />
+
+		<volume drive="Q" path="\\intranet.sml.cz\datastore"        description="Datasklad" />
+	</layout>
+
+	<layout name="staff-extended">
+		<volume drive="R" path="\\intranet.sml.cz\resources"        description="Zdroje" />
+	</layout>
+
+	<layout name="admin">
+		<include layout="staff" />
+
+		<volume drive="L" path="\\win-02.sml.cz\netlogon"           description="Netlogon" />
+	</layout>
+
+
+	<apply layout="students">
+		<account name="students" />
+	</apply>
+
+	<apply layout="staff-basic">
+		<account name="správa" />
+	</apply>
+
+	<apply layout="staff">
+		<account name="teachers" />
+		<account name="mise" />
+	</apply>
+
+	<apply layout="staff-extended" supplementary="true">
+		<account name="management" />
+	</apply>
+
+	<apply layout="admin">
+		<account name="administrator" />
+	</apply>
+</layouts>

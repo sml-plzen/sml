@@ -1,0 +1,7 @@
+Name: Private Mount Namespace Setup
+Default: yes
+Priority: 251
+Session-Type: Additional
+Session:
+	[success=1 default=ignore]	pam_localuser.so
+	required			pam_namespace.so no_unmount_on_close
