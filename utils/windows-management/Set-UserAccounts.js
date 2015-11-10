@@ -12,7 +12,8 @@ function getPowerShellScriptName() {
 	return fso.BuildPath(fso.GetParentFolderName(fullName), fso.GetBaseName(fullName) + ".ps1")
 }
 
-var commandLine = "PowerShell -Version 2.0 -ExecutionPolicy Bypass -File"
+//var commandLine = "PowerShell -Version 2.0 -ExecutionPolicy Bypass -File"
+var commandLine = "PowerShell -ExecutionPolicy Bypass -File"
 commandLine += " " + shellQuote(getPowerShellScriptName())
 
 var args = WScript.Arguments

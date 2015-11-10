@@ -15,7 +15,7 @@ $accountTemplate = @{
 	scriptPath = 'Apply-Layout.js'
 }
 
-# this script block represents the purpose of the entire script, the rest is just presentation ...
+# this script block represents the meat of the entire script, the rest is just presentation ...
 $workerScriptBlock = {
 	param(
 		[Parameter(Position = 0, Mandatory = $true)]
@@ -27,8 +27,8 @@ $workerScriptBlock = {
 		$template
 		,
 		[Parameter(Position = 2, Mandatory = $true)]
-		[Hashtable]
-		$formRecord
+		[PSObject]
+		$monitor
 	)
 
 	# ==================================================================================================
@@ -118,11 +118,17 @@ $workerScriptBlock = {
 			,
 			[Parameter(Position = 1, Mandatory = $true)]
 			[Object]
-			$_
+			$data
 		)
 
 		process {
-			$ExecutionContext.InvokeCommand.ExpandString($string)
+			$private:_ = $data
+			try {
+				# $ExecutionContext.InvokeCommand.ExpandString($string) # doesn't work in PowerShell 3.0 & 4.0
+				Invoke-Expression ('"' + ($string -replace '(`*)"', '$1$1`"') + '"')
+			} catch {
+				''
+			}
 		}
 	}
 
@@ -159,13 +165,6 @@ $workerScriptBlock = {
 		}
 	}
 
-	$message = $null
-	$handler = [EventHandler]{
-		param()
-
-		& $formRecord.Updater $message
-	}
-
 	([adsisearcher](
 		"(&(|(objectClass=group)(objectClass=user))(|$(($accounts | % { "(sAMAccountName=$_)" }) -join '')))"
 	)).findAll() | ForEach-Object { $_.getDirectoryEntry() } | Get-User | ForEach-Object {
@@ -176,18 +175,15 @@ $workerScriptBlock = {
 			$_.commitChanges()
 		}
 
-		# build the user-account-processed message and invoke the form updater
-		$message = @{
-			messageType = 1
+		# tell the monitor about our progress
+		$monitor.Update(@{
 			distinguishedName = $_.distinguishedName.value
 			changes = $changes
-		}
-		$formRecord.Form.Invoke($handler)
+		})
 	}
 
-	# build the end-of-processing message and invoke the form updater
-	$message = @{ messageType = 0 }
-	$formRecord.Form.Invoke($handler)
+	# tell the monitor we are done
+	$monitor.Done()
 }
 
 function Get-PrivateType {
@@ -338,6 +334,20 @@ function Format-Changes
 	}
 }
 
+function Format-Message
+{
+	param(
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Hashtable]
+		$message
+	)
+
+	process {
+		$message.distinguishedName + [Environment]::NewLine +
+			((Format-Changes $message.changes) -join [Environment]::NewLine)
+	}
+}
+
 function Add-ControlToNextPanelRow
 {
 	param(
@@ -361,22 +371,40 @@ function Add-ControlToNextPanelRow
 	}
 }
 
-function Build-Form
+function Run-GUI
 {
 	param(
-		[Parameter(Position = 0, Mandatory = $false)]
+		[Parameter(Position = 0, Mandatory = $true)]
+		[ScriptBlock]
+		$scriptBlock
+		,
+		[Parameter(Position = 1, Mandatory = $false)]
+		[Object[]]
+		$arguments = @()
+		,
+		[Parameter(Position = 2, Mandatory = $false)]
 		[String]
 		$caption = [IO.Path]::GetFilenameWithoutExtension($script:MyInvocation.InvocationName)
 	)
 
 	process {
-		$formRecord = @{}
-		$formRecord.Form = New-Object Windows.Forms.Form
-		$formRecord.Form.Icon = [Drawing.Icon]::ExtractAssociatedIcon("$pshome\powershell.exe")
-		$formRecord.Form.Text = $caption
-		$formRecord.Form.Width *= 2
-		$formRecord.Form.Padding = New-Object Windows.Forms.Padding(10)
-		$formRecord.Form.add_Load({
+		# we use PSObject because it doesn't lose custom properties when unboxed when passed
+		# as an argument to .Net methods (in contrast to Object)
+		$monitor = New-Object PSObject
+
+		# state data storage
+		Add-Member -InputObject $monitor -Name State -MemberType NoteProperty -Value @{
+			Total = 0
+			Updated = 0
+		}
+
+		# the top level form
+		Add-Member -InputObject $monitor -Name Form -MemberType NoteProperty -Value (New-Object Windows.Forms.Form)
+		$monitor.Form.Icon = [Drawing.Icon]::ExtractAssociatedIcon("$pshome\powershell.exe")
+		$monitor.Form.Text = $caption
+		$monitor.Form.Width *= 2
+		$monitor.Form.Padding = New-Object Windows.Forms.Padding(10)
+		$monitor.Form.add_Load({
 			$SendMessage = Get-Method $this.getType() SendMessage @([Int], [Int], [Int])
 			$NativeMethodsType = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.NativeMethods
 			$winConst = Get-Constant $NativeMethodsType WM_UPDATEUISTATE, UIS_CLEAR, UIS_SET, UISF_HIDEFOCUS, UISF_HIDEACCEL
@@ -387,7 +415,7 @@ function Build-Form
 			# make sure the keyboard cues are NOT rendered throughout the form
 			[void]$SendMessage.Invoke($this, @($winConst.WM_UPDATEUISTATE, $MAKELONG.Invoke($null, @($winConst.UIS_SET, $winConst.UISF_HIDEACCEL)), 0))
 		})
-		$formRecord.Form.add_Shown({
+		$monitor.Form.add_Shown({
 			$this.Activate()
 		})
 
@@ -396,151 +424,264 @@ function Build-Form
 		$panel.RowCount = 0
 		$panel.Dock = [Windows.Forms.DockStyle]::Fill
 
-		$formRecord.ProcessedLabel = New-Object Windows.Forms.Label
-		$formRecord.ProcessedLabel.Text = Get-ProcessedLabelText
-		$formRecord.ProcessedLabel.AutoSize = $true
-		$formRecord.ProcessedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
-		$formRecord.ProcessedLabel.Dock = [Windows.Forms.DockStyle]::Left
-		Add-ControlToNextPanelRow $panel $formRecord.ProcessedLabel
+		Add-Member -InputObject $monitor -Name ProcessedLabel -MemberType NoteProperty -Value (New-Object Windows.Forms.Label)
+		$monitor.ProcessedLabel.Text = Get-ProcessedLabelText
+		$monitor.ProcessedLabel.AutoSize = $true
+		$monitor.ProcessedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
+		$monitor.ProcessedLabel.Dock = [Windows.Forms.DockStyle]::Left
+		Add-ControlToNextPanelRow $panel $monitor.ProcessedLabel
 
-		$formRecord.UpdatedLabel = New-Object Windows.Forms.Label
-		$formRecord.UpdatedLabel.Text = Get-UpdatedLabelText
-		$formRecord.UpdatedLabel.AutoSize = $true
-		$formRecord.UpdatedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
-		$formRecord.UpdatedLabel.Dock = [Windows.Forms.DockStyle]::Left
-		Add-ControlToNextPanelRow $panel $formRecord.UpdatedLabel
+		Add-Member -InputObject $monitor -Name UpdatedLabel -MemberType NoteProperty -Value (New-Object Windows.Forms.Label)
+		$monitor.UpdatedLabel.Text = Get-UpdatedLabelText
+		$monitor.UpdatedLabel.AutoSize = $true
+		$monitor.UpdatedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
+		$monitor.UpdatedLabel.Dock = [Windows.Forms.DockStyle]::Left
+		Add-ControlToNextPanelRow $panel $monitor.UpdatedLabel
 
-		$formRecord.Log = New-Object Windows.Forms.TextBox
-		$formRecord.Log.Multiline = $true
-		$formRecord.Log.ReadOnly = $true
-		$formRecord.Log.ScrollBars = [Windows.Forms.ScrollBars]::Vertical
-		$formRecord.Log.BackColor = [Drawing.SystemColors]::Window
-		$formRecord.Log.Margin = New-Object Windows.Forms.Padding(0)
-		$formRecord.Log.Dock = [Windows.Forms.DockStyle]::Fill
+		Add-Member -InputObject $monitor -Name Log -MemberType NoteProperty -Value (New-Object Windows.Forms.TextBox)
+		$monitor.Log.Multiline = $true
+		$monitor.Log.ReadOnly = $true
+		$monitor.Log.ScrollBars = [Windows.Forms.ScrollBars]::Vertical
+		$monitor.Log.BackColor = [Drawing.SystemColors]::Window
+		$monitor.Log.Margin = New-Object Windows.Forms.Padding(0)
+		$monitor.Log.Dock = [Windows.Forms.DockStyle]::Fill
 		# get the HideCaret MethodInfo reflection and save it in the control's Tag property
-		$formRecord.Log.Tag = Get-Method (Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods) HideCaret
-		$formRecord.Log.add_GotFocus({
+		$monitor.Log.Tag = Get-Method (Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods) HideCaret
+		$monitor.Log.add_GotFocus({
 			# call the HideCaret method to hide the caret
 			[void]$this.Tag.Invoke($null, @([Runtime.InteropServices.HandleRef](New-Object Runtime.InteropServices.HandleRef($this, $this.Handle))))
 		})
 		# set the style of the TableLayoutPanel's row for this control such that it stretches vertically as much as possible
-		Add-ControlToNextPanelRow $panel $formRecord.Log (New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent, 100))
+		Add-ControlToNextPanelRow $panel $monitor.Log (New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent, 100))
 
 		$buttonPanel = New-Object Windows.Forms.FlowLayoutPanel
 		$buttonPanel.AutoSize = $true
 		$buttonPanel.Margin = New-Object Windows.Forms.Padding(0, 10, 0, 0)
 		$buttonPanel.Dock = [Windows.Forms.DockStyle]::Right
 
-		$formRecord.StopButton = New-Object Windows.Forms.Button
-		$formRecord.StopButton.Text = 'Stop'
-		$formRecord.StopButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
-		$buttonPanel.Controls.Add($formRecord.StopButton)
-
-		$formRecord.CloseButton = New-Object Windows.Forms.Button
-		$formRecord.CloseButton.Text = 'Close'
-		$formRecord.CloseButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
-		$formRecord.CloseButton.Enabled = $false
-		$formRecord.CloseButton.add_Click({
-			$this.TopLevelControl.Close()
+		Add-Member -InputObject $monitor -Name StopButton -MemberType NoteProperty -Value (New-Object Windows.Forms.Button)
+		$monitor.StopButton.Tag = $monitor
+		$monitor.StopButton.Text = 'Stop'
+		$monitor.StopButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
+		$monitor.StopButton.Enabled = $true
+		$monitor.StopButton.add_Click({
+			$state = $this.Tag.State
+			if ($state.Pipe) {
+				$state.AsyncStopHandle = $state.Pipe.BeginStop($null, $null)
+				$state.Pipe = $null
+				$this.Tag.ToggleButtons()
+			}
 		})
-		$buttonPanel.Controls.Add($formRecord.CloseButton)
+		$buttonPanel.Controls.Add($monitor.StopButton)
+
+		Add-Member -InputObject $monitor -Name CloseButton -MemberType NoteProperty -Value (New-Object Windows.Forms.Button)
+		$monitor.CloseButton.Tag = $monitor
+		$monitor.CloseButton.Text = 'Close'
+		$monitor.CloseButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
+		$monitor.CloseButton.Enabled = $false
+		$monitor.CloseButton.add_Click({
+			$this.Tag.Form.Close()
+		})
+		$buttonPanel.Controls.Add($monitor.CloseButton)
 
 		Add-ControlToNextPanelRow $panel $buttonPanel
 
-		$formRecord.Form.Controls.Add($panel)
-		$formRecord.Form.CancelButton = $formRecord.StopButton
-		$formRecord.Form.AcceptButton = $formRecord.CloseButton
-		$formRecord.StopButton.Select()
+		$monitor.Form.Controls.Add($panel)
+		$monitor.Form.CancelButton = $monitor.StopButton
+		$monitor.Form.AcceptButton = $monitor.CloseButton
+		$monitor.StopButton.Select()
 
-		$formRecord
+		Add-Member -InputObject $monitor -Name ToggleButtons -MemberType ScriptMethod -Value {
+			$shouldSelect = [Object]::ReferenceEquals($this.Form.ActiveControl, $this.StopButton)
+
+			$this.StopButton.Enabled = $false
+			$this.CloseButton.Enabled = $true
+
+			if ($shouldSelect) {
+				$this.CloseButton.Select()
+			}
+		}
+
+		Add-Member -InputObject $monitor -Name _Update -MemberType ScriptMethod -Value {
+			param(
+				[Parameter(Position = 0, Mandatory = $true)]
+				[Hashtable]
+				$message
+			)
+
+			$this.ProcessedLabel.Text = Get-ProcessedLabelText (++$this.State.Total)
+
+			if ($message.changes.count -gt 0) {
+				# update the count & log of updated user accounts
+				$logRecord = ''
+				if ($this.State.Updated -gt 0) {
+					$logRecord += [Environment]::NewLine
+				}
+				$logRecord += (Format-Message $message)
+
+				$this.UpdatedLabel.Text = Get-UpdatedLabelText (++$this.State.Updated)
+				$this.Log.AppendText($logRecord)
+			}
+		}
+
+		Add-Member -InputObject $monitor -Name _UpdateAction -MemberType NoteProperty -Value ([Action[PSObject,Hashtable]]{
+			param(
+				[Parameter(Position = 0, Mandatory = $true)]
+				[PSObject]
+				$target
+				,
+				[Parameter(Position = 1, Mandatory = $true)]
+				[Hashtable]
+				$message
+			)
+
+			$target._Update($message)
+		})
+
+		Add-Member -InputObject $monitor -Name _Done -MemberType ScriptMethod -Value {
+			param()
+
+			# the worker thread has finished processing of the user accounts;
+			# disable the 'Stop' button & enable the 'Close' button
+			$this.ToggleButtons()
+		}
+
+		Add-Member -InputObject $monitor -Name _DoneAction -MemberType NoteProperty -Value ([Action[PSObject]]{
+			param(
+				[Parameter(Position = 0, Mandatory = $true)]
+				[PSObject]
+				$target
+			)
+
+			$target._Done()
+		})
+
+		$monitor.Form.Show()
+
+		$pipe = [PowerShell]::Create()
+		$monitor.State.Pipe = $pipe
+
+		# define the Update & Done methods on the client thread to avoid performance
+		# penatly of their invocations from the client thread on certain versions of
+		# PowerShell
+		[void]$pipe.AddScript({
+			param(
+				[Parameter(Position = 0, Mandatory = $true)]
+				[PSObject]
+				$monitor
+			)
+
+			Add-Member -InputObject $monitor -Name Update -MemberType ScriptMethod -Value {
+				param(
+					[Parameter(Position = 0, Mandatory = $true)]
+					[Hashtable]
+					$message
+				)
+
+				# schedule the _UpdateAtion handler for execution on the GUI thread
+				[void]$this.Form.BeginInvoke($this._UpdateAction, $this, $message)
+			}
+
+			Add-Member -InputObject $monitor -Name Done -MemberType ScriptMethod -Value {
+				param()
+
+				# schedule the _DoneAction handler for execution on the GUI thread
+				[void]$this.Form.BeginInvoke($this._DoneAction, $this)
+			}
+		}).AddArgument($monitor)
+
+		# now add the worker script block
+		[void]$pipe.AddScript($scriptBlock)
+		foreach ($a in $arguments) {
+			[void]$pipe.AddArgument($a)
+		}
+		# append the monitor as the last argument
+		[void]$pipe.AddArgument($monitor)
+
+		# run the worker pipeline asynchronously
+		$asyncHandle = $pipe.BeginInvoke()
+
+		# run the event loop for the monitor form
+		[Windows.Forms.Application]::run($monitor.Form)
+
+		if ($monitor.State.AsyncStopHandle) {
+			$pipe.EndStop($monitor.State.AsyncStopHandle)
+		} elseif (-not $asyncHandle.IsCompleted) {
+			$pipe.Stop()
+		}
+		if ($pipe.InvocationStateInfo.State -eq [Management.Automation.PSInvocationState]::Completed) {
+			[void]$pipe.EndInvoke($asyncHandle)
+		}
+		$pipe.Dispose()
 	}
 }
 
-function Toggle-FormButtons
+function Run-Console
 {
 	param(
 		[Parameter(Position = 0, Mandatory = $true)]
-		[Hashtable]
-		$formRecord
+		[ScriptBlock]
+		$scriptBlock
+		,
+		[Parameter(Position = 1, Mandatory = $false)]
+		[Object[]]
+		$arguments = @()
 	)
 
 	process {
-		$shouldSelect = [Object]::ReferenceEquals($formRecord.Form.ActiveControl, $formRecord.StopButton)
+		# we use PSObject because it doesn't lose custom properties when unboxed when passed
+		# as an argument to .Net methods (in contrast to Object).
+		$monitor = New-Object PSObject
 
-		$formRecord.StopButton.Enabled = $false
-		$formRecord.CloseButton.Enabled = $true
+		Add-Member -InputObject $monitor -Name Update -MemberType ScriptMethod -Value {
+			param(
+				[Parameter(Position = 0, Mandatory = $true)]
+				[Hashtable]
+				$message
+			)
 
-		if ($shouldSelect) {
-			$formRecord.CloseButton.Select()
+			if ($message.changes.count -gt 0) {
+				[Console]::WriteLine((Format-Message $message))
+			}
 		}
+
+		Add-Member -InputObject $monitor -Name Done -MemberType ScriptMethod -Value {
+			param()
+		}
+
+		# append the monitor as the last argument
+		$arguments += $monitor
+
+		Invoke-Command $scriptBlock -ArgumentList $arguments
 	}
 }
 
+function Get-ConsoleWindowVisibility
+{
+	param()
+
+	process {
+		$GetConsoleWindow = Get-Method (Get-PrivateType ([PSObject].Assembly) System.Management.Automation.ConsoleVisibility) GetConsoleWindow
+		$IsWindowVisible = Get-Method (Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods) IsWindowVisible
+
+		# get the console window handle
+		$handle = [IntPtr]$GetConsoleWindow.Invoke($null, @())
+		if ($handle -eq [IntPtr]::Zero) {
+			$false
+		} else {
+			[Boolean]$IsWindowVisible.Invoke($null, @([Runtime.InteropServices.HandleRef](New-Object Runtime.InteropServices.HandleRef($IsWindowVisible, $handle))))
+		}
+	}
+}
 
 # main Main MAIN
 Add-Type -AssemblyName System.Windows.Forms
 [Windows.Forms.Application]::EnableVisualStyles()
 
-$formRecord = Build-Form
-
-$stats = @{
-	total = 0
-	updated = 0
+if (Get-ConsoleWindowVisibility) {
+	# log progress/changes to console if it is visible
+	Run-Console $workerScriptBlock $accounts, $accountTemplate
+} else {
+	# log progress/changes to a windows forms dialog window if console is not visible
+	Run-GUI $workerScriptBlock $accounts, $accountTemplate
 }
-# this code block will be called periodically from the worker thread to update the form UI
-$formRecord.Updater = {
-	param(
-		[Parameter(Position = 0, Mandatory = $true)]
-		[Hashtable]
-		$message
-	)
-
-	if ($message.messageType -eq 0) {
-		# the worker thread has finished processing of the user accounts;
-		# disable the 'Stop' button & enable the 'Close' button
-		Toggle-FormButtons $formRecord
-	} elseif ($message.messageType -eq 1) {
-		# update the count of processed user accounts
-		$formRecord.ProcessedLabel.Text = Get-ProcessedLabelText (++$stats.total)
-
-		if ($message.changes.count -gt 0) {
-			# update the count & log of updated user accounts
-			$logRecord = ''
-			if ($stats.updated -gt 0) {
-				$logRecord += [Environment]::NewLine
-			}
-			$logRecord += $message.distinguishedName + [Environment]::NewLine +
-				((Format-Changes $message.changes) -join [Environment]::NewLine)
-
-			$formRecord.UpdatedLabel.Text = Get-UpdatedLabelText (++$stats.updated)
-			$formRecord.Log.AppendText($logRecord)
-		}
-	}
-}
-
-$ps = [PowerShell]::Create().AddScript($workerScriptBlock).AddArgument($accounts).AddArgument($accountTemplate).AddArgument($formRecord)
-$workerAsyncInvoke = $null
-$workerAsyncStop = $null
-
-$formRecord.Form.add_HandleCreated({
-	# start the worker thread as soon as the handle for the form has been created
-	$workerAsyncInvoke = $ps.BeginInvoke()
-})
-
-# add 'Stop' button handler
-$formRecord.StopButton.add_Click({
-	$workerAsyncStop = $ps.BeginStop($null, $null)
-	Toggle-FormButtons $formRecord
-})
-
-# make sure the form is shown even if the process was started with SW_HIDE
-$formRecord.Form.Show()
-[Windows.Forms.Application]::run($formRecord.Form)
-
-if ($workerAsyncStop) {
-	$ps.EndStop($workerAsyncStop)
-} elseif (-not $workerAsyncInvoke.IsCompleted) {
-	$ps.Stop()
-}
-[void]$ps.EndInvoke($workerAsyncInvoke)
-$ps.Dispose()
