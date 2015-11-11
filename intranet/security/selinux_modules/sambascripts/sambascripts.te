@@ -1,0 +1,13 @@
+# SELinux policy module adding extra permissions for scripts executed by samba
+module sambascripts 1.0;
+
+require {
+	bool samba_create_home_dirs;
+	type smbd_t, user_home_dir_t;
+	class dir { setattr };
+}
+
+
+if(samba_create_home_dirs) {
+	allow smbd_t user_home_dir_t:dir { setattr };
+}

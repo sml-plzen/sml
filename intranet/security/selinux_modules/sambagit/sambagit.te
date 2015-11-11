@@ -1,0 +1,13 @@
+# SELinux policy module allowing samba to access git repos
+module sambagit 1.0;
+
+require {
+	type smbd_t, git_sys_content_t;
+	class dir { search create rmdir open rename getattr setattr ioctl lock read write add_name remove_name };
+	class file { create link unlink open rename getattr setattr ioctl lock read write };
+	class lnk_file { create unlink rename getattr read };
+}
+
+allow smbd_t git_sys_content_t:dir { search create rmdir open rename getattr setattr ioctl lock read write add_name remove_name };
+allow smbd_t git_sys_content_t:file { create link unlink open rename getattr setattr ioctl lock read write };
+allow smbd_t git_sys_content_t:lnk_file { create unlink rename getattr read };

@@ -1,0 +1,15 @@
+# these are scripts used to setup user environment/mounts
+/etc/security/namespace.d/[^/]+		system_u:object_r:bin_t:s0
+
+# allow mysql to access databases stored on the /data filesystem
+/data/database/mysql(/.*)?		system_u:object_r:mysqld_db_t:s0
+
+# samba shares
+/data/gallery(/.*)?			unconfined_u:object_r:samba_share_t:s0
+/data/share(/[^/]+(/.*)?)?		unconfined_u:object_r:samba_share_t:s0
+
+# two level home directories
+/data/share/home(/[^/]+)?		system_u:object_r:home_root_t:s0
+/data/share/home/[^/]+/[^/]+	-d	unconfined_u:object_r:user_home_dir_t:s0
+/data/share/home/[^/]+/[^/]+	-l	unconfined_u:object_r:user_home_dir_t:s0
+/data/share/home/[^/]+/[^/]+/.+		unconfined_u:object_r:user_home_t:s0

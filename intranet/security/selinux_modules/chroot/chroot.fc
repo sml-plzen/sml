@@ -1,0 +1,3 @@
+# label chroot jails root directories with a dedicated type
+/chroot(/[^/]+)?	-d	system_u:object_r:chroot_root_t:s0
+/chroot/[^/]+/.+		<<none>>

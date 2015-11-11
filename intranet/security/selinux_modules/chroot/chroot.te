@@ -1,0 +1,21 @@
+# SELinux policy module handling sshd chroot access
+module chroot 1.0;
+
+require {
+	attribute file_type, non_security_file_type, polyparent;
+	type chroot_user_t, sshd_t, cifs_t, samba_share_t;
+	class dir { search create rmdir open rename getattr setattr ioctl lock read write add_name remove_name };
+	class file { create link unlink open rename getattr setattr ioctl lock read write };
+	class lnk_file { create unlink rename getattr read };
+}
+
+# define a dedicated type to be used chroot jails root directories
+type chroot_root_t, file_type, non_security_file_type, polyparent;
+
+
+allow chroot_user_t chroot_root_t:dir { search getattr };
+allow chroot_user_t { cifs_t samba_share_t }:dir { search create rmdir open rename getattr setattr ioctl lock read write add_name remove_name };
+allow chroot_user_t { cifs_t samba_share_t }:file { create link unlink open rename getattr setattr ioctl lock read write };
+allow chroot_user_t { cifs_t samba_share_t }:lnk_file { create unlink rename getattr read };
+
+allow sshd_t { samba_share_t chroot_root_t }:dir search;

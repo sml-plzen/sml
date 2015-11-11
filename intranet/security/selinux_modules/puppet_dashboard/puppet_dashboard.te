@@ -1,0 +1,13 @@
+# SELinux policy module handling passenger
+module puppet_dashboard 1.0;
+
+require {
+	type httpd_t, passenger_t, passenger_tmp_t, locale_t;
+	class tcp_socket { name_bind };
+	class file { open getattr read write };
+	class sock_file { write };
+}
+
+#allow httpd_t tcp_port_t:tcp_socket { name_bind };
+allow passenger_t locale_t:file { open read write getattr };
+allow httpd_t passenger_tmp_t:sock_file { write };
