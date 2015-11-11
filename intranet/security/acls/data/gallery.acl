@@ -1,0 +1,15 @@
+# owner: SML\134administrator
+# group: SML\134domain\040users
+user::rwx
+group::---
+group:tomcat:rwx
+group:SML\134sis:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::---
+default:group:tomcat:rwx
+default:group:SML\134sis:rwx
+default:mask::rwx
+default:other::---
+

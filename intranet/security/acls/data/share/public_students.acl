@@ -1,0 +1,19 @@
+# owner: SML\134administrator
+# group: SML\134domain\040users
+user::rwx
+group::---
+group:SML\134sis:rwx
+group:SML\134students:rwx
+group:SML\134teachers:rwx
+group:SML\134mise:rwx
+mask::rwx
+other::---
+default:user::rwx
+default:group::---
+default:group:SML\134sis:rwx
+default:group:SML\134students:rwx
+default:group:SML\134teachers:rwx
+default:group:SML\134mise:rwx
+default:mask::rwx
+default:other::---
+
