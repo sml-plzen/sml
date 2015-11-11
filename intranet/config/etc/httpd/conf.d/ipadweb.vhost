@@ -1,0 +1,23 @@
+#
+# IPadWeb virtual host
+#
+#
+
+<VirtualHost *:80>
+    ServerName www.ipadvplzni.cz
+    ServerAlias ipadvplzni.cz puppet.sml.cz
+#    ServerAdmin webmaster@dummy-host.example.com
+#    DocumentRoot /www/docs/dummy-host.example.com
+#    ServerName dummy-host.example.com
+#    ErrorLog logs/dummy-host.example.com-error_log
+#    CustomLog logs/dummy-host.example.com-access_log common
+
+    RewriteEngine on
+
+    RewriteCond %{HTTP_HOST} (.*)
+    RewriteRule ^(/?)$ http://%1/ipadweb$1 [R=permanent]
+
+    # Now configure the proxy rules for SWIG running in Tomcat
+    ProxyPass /ipadweb/ ajp://localhost:8009/ipadweb/
+    ProxyPass /ipadweb ajp://localhost:8009/ipadweb
+</VirtualHost>
