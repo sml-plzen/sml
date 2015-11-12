@@ -283,42 +283,6 @@ function Get-Method {
 	}
 }
 
-function Get-ProcessedLabelText
-{
-	param(
-		[Parameter(Position = 0, Mandatory = $false)]
-		[Int]
-		$count = 0
-	)
-
-	process {
-		$plural = ''
-		if ($count -ne 1) {
-			$plural += 's'
-		}
-
-		"Processed $count user account$($plural)."
-	}
-}
-
-function Get-UpdatedLabelText
-{
-	param(
-		[Parameter(Position = 0, Mandatory = $false)]
-		[Int]
-		$count = 0
-	)
-
-	process {
-		$plural = ''
-		if ($count -ne 1) {
-			$plural += 's'
-		}
-
-		"Updated $count user account$($plural):"
-	}
-}
-
 function Format-Changes
 {
 	param(
@@ -365,8 +329,29 @@ function Add-ControlToNextPanelRow
 	)
 
 	process {
-		++$panel.RowCount
 		[void]$panel.RowStyles.Add($style)
+		$panel.Controls.Add($control)
+	}
+}
+
+function Add-ControlToNextPanelColumn
+{
+	param(
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Windows.Forms.TableLayoutPanel]
+		$panel
+		,
+		[Parameter(Position = 1, Mandatory = $true)]
+		[Windows.Forms.Control]
+		$control
+		,
+		[Parameter(Position = 2, Mandatory = $false)]
+		[Windows.Forms.ColumnStyle]
+		$style = (New-Object Windows.Forms.ColumnStyle)
+	)
+
+	process {
+		[void]$panel.ColumnStyles.Add($style)
 		$panel.Controls.Add($control)
 	}
 }
@@ -403,7 +388,7 @@ function Run-GUI
 		$monitor.Form.Icon = [Drawing.Icon]::ExtractAssociatedIcon("$pshome\powershell.exe")
 		$monitor.Form.Text = $caption
 		$monitor.Form.Width *= 2
-		$monitor.Form.Padding = New-Object Windows.Forms.Padding(10)
+		$monitor.Form.Padding = New-Object Windows.Forms.Padding(10, 10, 10, 6)
 		$monitor.Form.add_Load({
 			$SendMessage = Get-Method $this.getType() SendMessage @([Int], [Int], [Int])
 			$NativeMethodsType = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.NativeMethods
@@ -425,17 +410,15 @@ function Run-GUI
 		$panel.Dock = [Windows.Forms.DockStyle]::Fill
 
 		Add-Member -InputObject $monitor -Name ProcessedLabel -MemberType NoteProperty -Value (New-Object Windows.Forms.Label)
-		$monitor.ProcessedLabel.Text = Get-ProcessedLabelText
 		$monitor.ProcessedLabel.AutoSize = $true
 		$monitor.ProcessedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
-		$monitor.ProcessedLabel.Dock = [Windows.Forms.DockStyle]::Left
+		$monitor.ProcessedLabel.Anchor = [Windows.Forms.AnchorStyles]::Left
 		Add-ControlToNextPanelRow $panel $monitor.ProcessedLabel
 
 		Add-Member -InputObject $monitor -Name UpdatedLabel -MemberType NoteProperty -Value (New-Object Windows.Forms.Label)
-		$monitor.UpdatedLabel.Text = Get-UpdatedLabelText
 		$monitor.UpdatedLabel.AutoSize = $true
 		$monitor.UpdatedLabel.Margin = New-Object Windows.Forms.Padding(0, 0, 0, 2)
-		$monitor.UpdatedLabel.Dock = [Windows.Forms.DockStyle]::Left
+		$monitor.UpdatedLabel.Anchor = [Windows.Forms.AnchorStyles]::Left
 		Add-ControlToNextPanelRow $panel $monitor.UpdatedLabel
 
 		Add-Member -InputObject $monitor -Name Log -MemberType NoteProperty -Value (New-Object Windows.Forms.TextBox)
@@ -454,44 +437,58 @@ function Run-GUI
 		# set the style of the TableLayoutPanel's row for this control such that it stretches vertically as much as possible
 		Add-ControlToNextPanelRow $panel $monitor.Log (New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent, 100))
 
-		$buttonPanel = New-Object Windows.Forms.FlowLayoutPanel
-		$buttonPanel.AutoSize = $true
-		$buttonPanel.Margin = New-Object Windows.Forms.Padding(0, 10, 0, 0)
-		$buttonPanel.Dock = [Windows.Forms.DockStyle]::Right
+		$bottomPanel = New-Object Windows.Forms.TableLayoutPanel
+		$bottomPanel.ColumnCount = 0
+		$bottomPanel.RowCount = 1
+		$bottomPanel.GrowStyle = [Windows.Forms.TableLayoutPanelGrowStyle]::AddColumns
+		$bottomPanel.AutoSize = $true
+		$bottomPanel.Margin = New-Object Windows.Forms.Padding(0, 10, 0, 0)
+		$bottomPanel.Dock = [Windows.Forms.DockStyle]::Bottom
+
+		$version = $PSVersionTable.PSVersion
+		$versionLabel = New-Object Windows.Forms.Label
+		$versionLabel.Text = 'PowerShell ' + $version.Major + '.' + $version.Minor
+		$versionLabel.AutoSize = $true
+		$versionLabel.Font = New-Object Drawing.Font($versionLabel.Font.FontFamily, [Single]($versionLabel.Font.Size * 0.8), $versionLabel.Font.Style, $versionLabel.Font.Unit)
+		$versionLabel.Enabled = $false
+		$versionLabel.Margin = New-Object Windows.Forms.Padding(2, 0, 0, 0)
+		$versionLabel.Anchor = [Windows.Forms.AnchorStyles]::Left -bor [Windows.Forms.AnchorStyles]::Bottom
+		Add-ControlToNextPanelColumn $bottomPanel $versionLabel (New-Object Windows.Forms.ColumnStyle([Windows.Forms.SizeType]::Percent, 100))
 
 		Add-Member -InputObject $monitor -Name StopButton -MemberType NoteProperty -Value (New-Object Windows.Forms.Button)
 		$monitor.StopButton.Tag = $monitor
 		$monitor.StopButton.Text = 'Stop'
-		$monitor.StopButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
+		$monitor.StopButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 4)
 		$monitor.StopButton.Enabled = $true
 		$monitor.StopButton.add_Click({
 			$state = $this.Tag.State
 			if ($state.Pipe) {
 				$state.AsyncStopHandle = $state.Pipe.BeginStop($null, $null)
 				$state.Pipe = $null
-				$this.Tag.ToggleButtons()
+				$this.Tag._ToggleButtons()
+				$this.Tag._UpdateProcessedLabel()
 			}
 		})
-		$buttonPanel.Controls.Add($monitor.StopButton)
+		Add-ControlToNextPanelColumn $bottomPanel $monitor.StopButton
 
 		Add-Member -InputObject $monitor -Name CloseButton -MemberType NoteProperty -Value (New-Object Windows.Forms.Button)
 		$monitor.CloseButton.Tag = $monitor
 		$monitor.CloseButton.Text = 'Close'
-		$monitor.CloseButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 0)
+		$monitor.CloseButton.Margin = New-Object Windows.Forms.Padding(10, 0, 0, 4)
 		$monitor.CloseButton.Enabled = $false
 		$monitor.CloseButton.add_Click({
 			$this.Tag.Form.Close()
 		})
-		$buttonPanel.Controls.Add($monitor.CloseButton)
+		Add-ControlToNextPanelColumn $bottomPanel $monitor.CloseButton
 
-		Add-ControlToNextPanelRow $panel $buttonPanel
+		Add-ControlToNextPanelRow $panel $bottomPanel
 
 		$monitor.Form.Controls.Add($panel)
 		$monitor.Form.CancelButton = $monitor.StopButton
 		$monitor.Form.AcceptButton = $monitor.CloseButton
 		$monitor.StopButton.Select()
 
-		Add-Member -InputObject $monitor -Name ToggleButtons -MemberType ScriptMethod -Value {
+		Add-Member -InputObject $monitor -Name _ToggleButtons -MemberType ScriptMethod -Value {
 			$shouldSelect = [Object]::ReferenceEquals($this.Form.ActiveControl, $this.StopButton)
 
 			$this.StopButton.Enabled = $false
@@ -502,6 +499,43 @@ function Run-GUI
 			}
 		}
 
+		Add-Member -InputObject $monitor -Name _UpdateProcessedLabel -MemberType ScriptMethod -Value {
+			param(
+				[Parameter(Position = 0, Mandatory = $false)]
+				[Int]
+				$increment = 0
+			)
+
+			$count = ($this.State.Total += $increment)
+
+			$ending = ''
+			if ($count -ne 1) {
+				$ending += 's'
+			}
+			if ($this.State.Contains('AsyncStopHandle')) {
+				$ending += '; interrupted'
+			}
+
+			$this.ProcessedLabel.Text = "Processed $count user account$($ending)."
+		}
+
+		Add-Member -InputObject $monitor -Name _UpdateUpdatedLabel -MemberType ScriptMethod -Value {
+			param(
+				[Parameter(Position = 0, Mandatory = $false)]
+				[Int]
+				$increment = 0
+			)
+
+			$count = ($this.State.Updated += $increment)
+
+			$plural = ''
+			if ($count -ne 1) {
+				$plural += 's'
+			}
+
+			$this.UpdatedLabel.Text = "Updated $count user account$($plural):"
+		}
+
 		Add-Member -InputObject $monitor -Name _Update -MemberType ScriptMethod -Value {
 			param(
 				[Parameter(Position = 0, Mandatory = $true)]
@@ -509,17 +543,17 @@ function Run-GUI
 				$message
 			)
 
-			$this.ProcessedLabel.Text = Get-ProcessedLabelText (++$this.State.Total)
+			$this._UpdateProcessedLabel(1)
 
 			if ($message.changes.count -gt 0) {
 				# update the count & log of updated user accounts
+				$this._UpdateUpdatedLabel(1)
+
 				$logRecord = ''
-				if ($this.State.Updated -gt 0) {
+				if ($this.State.Updated -gt 1) {
 					$logRecord += [Environment]::NewLine
 				}
 				$logRecord += (Format-Message $message)
-
-				$this.UpdatedLabel.Text = Get-UpdatedLabelText (++$this.State.Updated)
 				$this.Log.AppendText($logRecord)
 			}
 		}
@@ -543,7 +577,7 @@ function Run-GUI
 
 			# the worker thread has finished processing of the user accounts;
 			# disable the 'Stop' button & enable the 'Close' button
-			$this.ToggleButtons()
+			$this._ToggleButtons()
 		}
 
 		Add-Member -InputObject $monitor -Name _DoneAction -MemberType NoteProperty -Value ([Action[PSObject]]{
@@ -556,6 +590,8 @@ function Run-GUI
 			$target._Done()
 		})
 
+		$monitor._UpdateProcessedLabel()
+		$monitor._UpdateUpdatedLabel()
 		$monitor.Form.Show()
 
 		$pipe = [PowerShell]::Create()
