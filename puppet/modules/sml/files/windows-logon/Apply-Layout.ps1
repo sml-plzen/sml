@@ -1,7 +1,7 @@
 ﻿# display the specified message in a message box and exit
 function Display-ErrorMessage
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[string]
 		$message
@@ -27,7 +27,7 @@ function Display-ErrorMessage
 # return distinguished names corresponding to the specified account names
 function Get-ADAccountDN
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[string[]]
 		$accounts
@@ -58,7 +58,7 @@ function Get-ADAccountDN
 # the user is a member of
 function Get-GroupMembership
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[DirectoryServices.DirectoryEntry]
 		$user
@@ -140,7 +140,7 @@ function Get-GroupMembership
 # of a layout priority map
 function Read-Layouts
 {
-	param()
+	param ()
 
 	process {
 		$layoutsFile = [IO.Path]::GetDirectoryName($script:MyInvocation.InvocationName) + '\layouts.xml'
@@ -220,7 +220,7 @@ function Read-Layouts
 #   @{'one' = 1; 'two' = 2}
 function ConvertTo-Map
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		# we cannot specify the type so as to be able to support
 		# collections returned from COM objects

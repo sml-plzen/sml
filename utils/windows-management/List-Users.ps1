@@ -1,5 +1,5 @@
-﻿param(
-	[Parameter(Position=0, Mandatory=$false)]
+﻿param (
+	[Parameter(Position = 0, Mandatory = $false)]
 	[string[]]
 	#$accounts = @('Remote Desktop Users')
 	$accounts = @('Students', 'Teachers', 'mise', 'správa')
@@ -22,12 +22,12 @@
 
 function Get-User
 {
-	param(
-		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
+	param (
+		[Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true)]
 		[DirectoryServices.DirectoryEntry[]]
 		$account
 		,
-		[Parameter(Mandatory=$false)]
+		[Parameter(Mandatory = $false)]
 		[Hashtable]
 		$processed
 	)
@@ -97,8 +97,8 @@ function Get-User
 
 function Get-NTAccountName
 {
-	param(
-		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
+	param (
+		[Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true)]
 		[string[]]
 		$distinguishedName
 	)

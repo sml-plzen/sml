@@ -1,9 +1,9 @@
-﻿param(
-	[Parameter(Position=0, Mandatory=$true)]
+﻿param (
+	[Parameter(Position = 0, Mandatory = $true)]
 	[string]
 	$outputFile
 	,
-	[Parameter(Position=1, Mandatory=$false)]
+	[Parameter(Position = 1, Mandatory = $false)]
 	[string[]]
 	#$accounts = @('Remote Desktop Users')
 	$accounts = @('Students', 'Teachers', 'mise', 'správa')
@@ -26,12 +26,12 @@
 
 function Get-User
 {
-	param(
-		[Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$true)]
+	param (
+		[Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true)]
 		[DirectoryServices.DirectoryEntry[]]
 		$account
 		,
-		[Parameter(Mandatory=$false)]
+		[Parameter(Mandatory = $false)]
 		[Hashtable]
 		$processed
 	)

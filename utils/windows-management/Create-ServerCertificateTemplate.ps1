@@ -1,6 +1,6 @@
 ﻿function Get-Bytes
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		$value
 	)
@@ -16,7 +16,7 @@
 
 function Get-EncodedInterval
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[Int]
 		$days

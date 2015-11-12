@@ -1,4 +1,4 @@
-﻿param(
+﻿param (
 	[Parameter(Position = 0, Mandatory = $false)]
 	[string[]]
 	#$accounts = @('Remote Desktop Users')
@@ -17,7 +17,7 @@ $accountTemplate = @{
 
 # this script block represents the meat of the entire script, the rest is just presentation ...
 $workerScriptBlock = {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[String[]]
 		$accounts
@@ -48,7 +48,7 @@ $workerScriptBlock = {
 
 	function Get-User
 	{
-		param(
+		param (
 			[Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true)]
 			[DirectoryServices.DirectoryEntry[]]
 			$account
@@ -111,7 +111,7 @@ $workerScriptBlock = {
 
 	function Expand-String
 	{
-		param(
+		param (
 			[Parameter(Position = 0, Mandatory = $true)]
 			[String]
 			$string
@@ -134,7 +134,7 @@ $workerScriptBlock = {
 
 	function Update-Object
 	{
-		param(
+		param (
 			[Parameter(Position = 0, Mandatory = $true)]
 			[Object]
 			$actual
@@ -285,7 +285,7 @@ function Get-Method {
 
 function Format-Changes
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[Hashtable]
 		$changes
@@ -300,7 +300,7 @@ function Format-Changes
 
 function Format-Message
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[Hashtable]
 		$message
@@ -314,7 +314,7 @@ function Format-Message
 
 function Add-ControlToNextPanelRow
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[Windows.Forms.TableLayoutPanel]
 		$panel
@@ -336,7 +336,7 @@ function Add-ControlToNextPanelRow
 
 function Add-ControlToNextPanelColumn
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[Windows.Forms.TableLayoutPanel]
 		$panel
@@ -358,7 +358,7 @@ function Add-ControlToNextPanelColumn
 
 function Run-GUI
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[ScriptBlock]
 		$scriptBlock
@@ -500,7 +500,7 @@ function Run-GUI
 		}
 
 		Add-Member -InputObject $monitor -Name _UpdateProcessedLabel -MemberType ScriptMethod -Value {
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $false)]
 				[Int]
 				$increment = 0
@@ -520,7 +520,7 @@ function Run-GUI
 		}
 
 		Add-Member -InputObject $monitor -Name _UpdateUpdatedLabel -MemberType ScriptMethod -Value {
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $false)]
 				[Int]
 				$increment = 0
@@ -537,7 +537,7 @@ function Run-GUI
 		}
 
 		Add-Member -InputObject $monitor -Name _Update -MemberType ScriptMethod -Value {
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $true)]
 				[Hashtable]
 				$message
@@ -559,7 +559,7 @@ function Run-GUI
 		}
 
 		Add-Member -InputObject $monitor -Name _UpdateAction -MemberType NoteProperty -Value ([Action[PSObject,Hashtable]]{
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $true)]
 				[PSObject]
 				$target
@@ -573,7 +573,7 @@ function Run-GUI
 		})
 
 		Add-Member -InputObject $monitor -Name _Done -MemberType ScriptMethod -Value {
-			param()
+			param ()
 
 			# the worker thread has finished processing of the user accounts;
 			# disable the 'Stop' button & enable the 'Close' button
@@ -581,7 +581,7 @@ function Run-GUI
 		}
 
 		Add-Member -InputObject $monitor -Name _DoneAction -MemberType NoteProperty -Value ([Action[PSObject]]{
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $true)]
 				[PSObject]
 				$target
@@ -601,14 +601,14 @@ function Run-GUI
 		# penatly of their invocations from the client thread on certain versions of
 		# PowerShell
 		[void]$pipe.AddScript({
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $true)]
 				[PSObject]
 				$monitor
 			)
 
 			Add-Member -InputObject $monitor -Name Update -MemberType ScriptMethod -Value {
-				param(
+				param (
 					[Parameter(Position = 0, Mandatory = $true)]
 					[Hashtable]
 					$message
@@ -619,7 +619,7 @@ function Run-GUI
 			}
 
 			Add-Member -InputObject $monitor -Name Done -MemberType ScriptMethod -Value {
-				param()
+				param ()
 
 				# schedule the _DoneAction handler for execution on the GUI thread
 				[void]$this.Form.BeginInvoke($this._DoneAction, $this)
@@ -654,7 +654,7 @@ function Run-GUI
 
 function Run-Console
 {
-	param(
+	param (
 		[Parameter(Position = 0, Mandatory = $true)]
 		[ScriptBlock]
 		$scriptBlock
@@ -670,7 +670,7 @@ function Run-Console
 		$monitor = New-Object PSObject
 
 		Add-Member -InputObject $monitor -Name Update -MemberType ScriptMethod -Value {
-			param(
+			param (
 				[Parameter(Position = 0, Mandatory = $true)]
 				[Hashtable]
 				$message
@@ -682,7 +682,7 @@ function Run-Console
 		}
 
 		Add-Member -InputObject $monitor -Name Done -MemberType ScriptMethod -Value {
-			param()
+			param ()
 		}
 
 		# append the monitor as the last argument
@@ -694,7 +694,7 @@ function Run-Console
 
 function Get-ConsoleWindowVisibility
 {
-	param()
+	param ()
 
 	process {
 		$GetConsoleWindow = Get-Method (Get-PrivateType ([PSObject].Assembly) System.Management.Automation.ConsoleVisibility) GetConsoleWindow
