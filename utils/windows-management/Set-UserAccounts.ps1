@@ -1,6 +1,6 @@
 ﻿param (
 	[Parameter(Position = 0, Mandatory = $false)]
-	[string[]]
+	[String[]]
 	#$accounts = @('Remote Desktop Users')
 	$accounts = @('Students', 'Teachers', 'mise', 'správa')
 )
@@ -390,7 +390,7 @@ function Run-GUI
 		$monitor.Form.Width *= 2
 		$monitor.Form.Padding = New-Object Windows.Forms.Padding(10, 10, 10, 6)
 		$monitor.Form.add_Load({
-			$SendMessage = Get-Method $this.getType() SendMessage @([Int], [Int], [Int])
+			$SendMessage = Get-Method $this.getType() SendMessage @([Int32], [Int32], [Int32])
 			$NativeMethodsType = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.NativeMethods
 			$winConst = Get-Constant $NativeMethodsType WM_UPDATEUISTATE, UIS_CLEAR, UIS_SET, UISF_HIDEFOCUS, UISF_HIDEACCEL
 			$MAKELONG = Get-Method (Get-NestedType $NativeMethodsType Util) MAKELONG
@@ -502,7 +502,7 @@ function Run-GUI
 		Add-Member -InputObject $monitor -Name _UpdateProcessedLabel -MemberType ScriptMethod -Value {
 			param (
 				[Parameter(Position = 0, Mandatory = $false)]
-				[Int]
+				[Int32]
 				$increment = 0
 			)
 
@@ -522,7 +522,7 @@ function Run-GUI
 		Add-Member -InputObject $monitor -Name _UpdateUpdatedLabel -MemberType ScriptMethod -Value {
 			param (
 				[Parameter(Position = 0, Mandatory = $false)]
-				[Int]
+				[Int32]
 				$increment = 0
 			)
 

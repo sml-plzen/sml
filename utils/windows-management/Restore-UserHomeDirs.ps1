@@ -1,6 +1,6 @@
 ﻿param (
 	[Parameter(Position = 0, Mandatory = $true)]
-	[string]
+	[String]
 	$inputFile
 )
 

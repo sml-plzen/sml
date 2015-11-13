@@ -1,10 +1,10 @@
 ﻿param (
 	[Parameter(Position = 0, Mandatory = $true)]
-	[string]
+	[String]
 	$outputFile
 	,
 	[Parameter(Position = 1, Mandatory = $false)]
-	[string[]]
+	[String[]]
 	#$accounts = @('Remote Desktop Users')
 	$accounts = @('Students', 'Teachers', 'mise', 'správa')
 )

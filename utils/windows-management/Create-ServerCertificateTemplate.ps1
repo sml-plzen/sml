@@ -18,7 +18,7 @@ function Get-EncodedInterval
 {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
-		[Int]
+		[Int32]
 		$days
 	)
 
@@ -32,11 +32,11 @@ function Get-EncodedInterval
 
 $name = 'StandardServer'
 
-$domainDN = ([ADSI]'').distinguishedName
+$domainDN = ([adsi]'').distinguishedName
 $certifacteTemplatesContainerDN = "CN=Certificate Templates,CN=Public Key Services,CN=Services,CN=Configuration,$domainDN"
 $templateCN = "CN=$name"
 $templateDN = "$templateCN,$certifacteTemplatesContainerDN"
-$certifacteTemplatesContainer = [ADSI]"LDAP://$certifacteTemplatesContainerDN"
+$certifacteTemplatesContainer = [adsi]"LDAP://$certifacteTemplatesContainerDN"
 
 #(New-Object DirectoryServices.DirectorySearcher($certifacteTemplatesContainer, '(objectCategory=pKICertificateTemplate)')).findAll() | ForEach-Object {
 #	$_ = $_.getDirectoryEntry()
@@ -48,13 +48,13 @@ $certifacteTemplatesContainer = [ADSI]"LDAP://$certifacteTemplatesContainerDN"
 #}
 
 # Delete the template first if it already exists
-if ([ADSI]::Exists("LDAP://$templateDN")) {
+if ([adsi]::Exists("LDAP://$templateDN")) {
 	# Comment out the following two lines if you realy want to overwrite an exisitng template
 	Write-Output 'Exiting to prevent accidental overwriting of an existing certificate template.'
-	exit
+	Exit
 
 	# Delete the template
-	([ADSI]"LDAP://$templateDN").deleteObject(0)
+	([adsi]"LDAP://$templateDN").deleteObject(0)
 }
 
 # Create the template

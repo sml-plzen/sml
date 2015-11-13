@@ -1,6 +1,6 @@
 ﻿param (
 	[Parameter(Position = 0, Mandatory = $false)]
-	[string[]]
+	[String[]]
 	#$accounts = @('Remote Desktop Users')
 	$accounts = @('Students', 'Teachers', 'mise', 'správa')
 )
@@ -99,7 +99,7 @@ function Get-NTAccountName
 {
 	param (
 		[Parameter(Position = 0, Mandatory = $true, ValueFromPipeline = $true)]
-		[string[]]
+		[String[]]
 		$distinguishedName
 	)
 

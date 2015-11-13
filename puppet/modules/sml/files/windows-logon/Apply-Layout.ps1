@@ -3,7 +3,7 @@ function Display-ErrorMessage
 {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
-		[string]
+		[String]
 		$message
 		,
 		[Parameter(Position = 1, Mandatory = $false)]
@@ -20,7 +20,7 @@ function Display-ErrorMessage
 			[Windows.Forms.MessageBoxButtons]::OK, [Windows.Forms.MessageBoxIcon]::Warning
 		)
 
-		exit
+		Exit
 	}
 }
 
@@ -29,7 +29,7 @@ function Get-ADAccountDN
 {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
-		[string[]]
+		[String[]]
 		$accounts
 	)
 
@@ -232,7 +232,7 @@ function ConvertTo-Map
 		$map = @{}
 
 		$count = $collection.count
-		if (!($count -is [int])) {
+		if (!($count -is [Int32])) {
 			$count = $collection.count()
 		}
 		for ($i = 0; $i -lt $count; $i += 2) {
