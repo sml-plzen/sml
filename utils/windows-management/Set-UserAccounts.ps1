@@ -226,34 +226,6 @@ function Get-NestedType {
 	}
 }
 
-function Get-Constant {
-	param (
-		[Parameter(Position = 0, Mandatory = $true)]
-		[Type]
-		$type
-		,
-		[Parameter(Position = 1, Mandatory = $true, ValueFromPipeline = $true)]
-		[String[]]
-		$constantName
-	)
-
-	begin {
-		[Reflection.BindingFlags]$bindingFlags =
-			[Reflection.BindingFlags]::Static -bor [Reflection.BindingFlags]::Public -bor [Reflection.BindingFlags]::NonPublic
-		$result = @{}
-	}
-
-	process {
-		$constantName | ForEach-Object {
-			$result[$_] = $type.GetField($_, $bindingFlags).GetValue($null)
-		}
-	}
-
-	end {
-		$result
-	}
-}
-
 function Get-Method {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
@@ -390,15 +362,15 @@ function Run-GUI
 		$monitor.Form.Width *= 2
 		$monitor.Form.Padding = New-Object Windows.Forms.Padding(10, 10, 10, 6)
 		$monitor.Form.add_Load({
-			$SendMessage = Get-Method $this.getType() SendMessage @([Int32], [Int32], [Int32])
-			$NativeMethodsType = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.NativeMethods
-			$winConst = Get-Constant $NativeMethodsType WM_UPDATEUISTATE, UIS_CLEAR, UIS_SET, UISF_HIDEFOCUS, UISF_HIDEACCEL
-			$MAKELONG = Get-Method (Get-NestedType $NativeMethodsType Util) MAKELONG
+			$FormType = $this.getType()
+			$SendMessage = Get-Method $FormType SendMessage @([Int32], [Int32], [Int32])
+			$NativesType = Get-PrivateType $FormType.Assembly System.Windows.Forms.NativeMethods
+			$UtilsType = Get-NestedType $NativesType Util
 
 			# make sure the focus cues are rendered throughout the form
-			[void]$SendMessage.Invoke($this, @($winConst.WM_UPDATEUISTATE, $MAKELONG.Invoke($null, @($winConst.UIS_CLEAR, $winConst.UISF_HIDEFOCUS)), 0))
+			[void]$SendMessage.Invoke($this, @($NativesType::WM_UPDATEUISTATE, $UtilsType::MAKELONG($NativesType::UIS_CLEAR, $NativesType::UISF_HIDEFOCUS), 0))
 			# make sure the keyboard cues are NOT rendered throughout the form
-			[void]$SendMessage.Invoke($this, @($winConst.WM_UPDATEUISTATE, $MAKELONG.Invoke($null, @($winConst.UIS_SET, $winConst.UISF_HIDEACCEL)), 0))
+			[void]$SendMessage.Invoke($this, @($NativesType::WM_UPDATEUISTATE, $UtilsType::MAKELONG($NativesType::UIS_SET, $NativesType::UISF_HIDEACCEL), 0))
 		})
 		$monitor.Form.add_Shown({
 			$this.Activate()
@@ -428,11 +400,11 @@ function Run-GUI
 		$monitor.Log.BackColor = [Drawing.SystemColors]::Window
 		$monitor.Log.Margin = New-Object Windows.Forms.Padding(0)
 		$monitor.Log.Dock = [Windows.Forms.DockStyle]::Fill
-		# get the HideCaret MethodInfo reflection and save it in the control's Tag property
-		$monitor.Log.Tag = Get-Method (Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods) HideCaret
+		# get the System.Windows.Forms.SafeNativeMethods type and save it in the control's Tag property
+		$monitor.Log.Tag = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods
 		$monitor.Log.add_GotFocus({
 			# call the HideCaret method to hide the caret
-			[void]$this.Tag.Invoke($null, @([Runtime.InteropServices.HandleRef](New-Object Runtime.InteropServices.HandleRef($this, $this.Handle))))
+			[void]$this.Tag::HideCaret((New-Object Runtime.InteropServices.HandleRef($this, $this.Handle)))
 		})
 		# set the style of the TableLayoutPanel's row for this control such that it stretches vertically as much as possible
 		Add-ControlToNextPanelRow $panel $monitor.Log (New-Object Windows.Forms.RowStyle([Windows.Forms.SizeType]::Percent, 100))
@@ -558,19 +530,15 @@ function Run-GUI
 			}
 		}
 
-		Add-Member -InputObject $monitor -Name _UpdateAction -MemberType NoteProperty -Value ([Action[PSObject,Hashtable]]{
+		Add-Member -InputObject $monitor -Name _UpdateAction -MemberType NoteProperty -Value ([Action[Hashtable]]{
 			param (
 				[Parameter(Position = 0, Mandatory = $true)]
-				[PSObject]
-				$target
-				,
-				[Parameter(Position = 1, Mandatory = $true)]
 				[Hashtable]
 				$message
 			)
 
-			$target._Update($message)
-		})
+			$monitor._Update($message)
+		}.GetNewClosure())
 
 		Add-Member -InputObject $monitor -Name _Done -MemberType ScriptMethod -Value {
 			param ()
@@ -580,15 +548,11 @@ function Run-GUI
 			$this._ToggleButtons()
 		}
 
-		Add-Member -InputObject $monitor -Name _DoneAction -MemberType NoteProperty -Value ([Action[PSObject]]{
-			param (
-				[Parameter(Position = 0, Mandatory = $true)]
-				[PSObject]
-				$target
-			)
+		Add-Member -InputObject $monitor -Name _DoneAction -MemberType NoteProperty -Value ([Action]{
+			param ()
 
-			$target._Done()
-		})
+			$monitor._Done()
+		}.GetNewClosure())
 
 		$monitor._UpdateProcessedLabel()
 		$monitor._UpdateUpdatedLabel()
@@ -597,8 +561,8 @@ function Run-GUI
 		$pipe = [PowerShell]::Create()
 		$monitor.State.Pipe = $pipe
 
-		# define the Update & Done methods on the client thread to avoid performance
-		# penatly of their invocations from the client thread on certain versions of
+		# define the Update & Done methods on the worker thread to avoid performance
+		# penatly of their invocations from that thread on certain versions of
 		# PowerShell
 		[void]$pipe.AddScript({
 			param (
@@ -615,14 +579,14 @@ function Run-GUI
 				)
 
 				# schedule the _UpdateAtion handler for execution on the GUI thread
-				[void]$this.Form.BeginInvoke($this._UpdateAction, $this, $message)
+				[void]$this.Form.BeginInvoke($this._UpdateAction, $message)
 			}
 
 			Add-Member -InputObject $monitor -Name Done -MemberType ScriptMethod -Value {
 				param ()
 
 				# schedule the _DoneAction handler for execution on the GUI thread
-				[void]$this.Form.BeginInvoke($this._DoneAction, $this)
+				[void]$this.Form.BeginInvoke($this._DoneAction)
 			}
 		}).AddArgument($monitor)
 
@@ -645,7 +609,7 @@ function Run-GUI
 		} elseif (-not $asyncHandle.IsCompleted) {
 			$pipe.Stop()
 		}
-		if ($pipe.InvocationStateInfo.State -eq [Management.Automation.PSInvocationState]::Completed) {
+		if ([Management.Automation.PSInvocationState]::Completed.Equals($pipe.InvocationStateInfo.State)) {
 			[void]$pipe.EndInvoke($asyncHandle)
 		}
 		$pipe.Dispose()
@@ -696,16 +660,19 @@ function Get-ConsoleWindowVisibility
 {
 	param ()
 
-	process {
+	begin {
 		$GetConsoleWindow = Get-Method (Get-PrivateType ([PSObject].Assembly) System.Management.Automation.ConsoleVisibility) GetConsoleWindow
-		$IsWindowVisible = Get-Method (Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods) IsWindowVisible
+	}
 
+	process {
 		# get the console window handle
 		$handle = [IntPtr]$GetConsoleWindow.Invoke($null, @())
-		if ($handle -eq [IntPtr]::Zero) {
-			$false
+		if ($handle) {
+			$FormsSafeNativeMethodsType = Get-PrivateType ([Windows.Forms.Form].Assembly) System.Windows.Forms.SafeNativeMethods
+
+			$FormsSafeNativeMethodsType::IsWindowVisible((New-Object Runtime.InteropServices.HandleRef($Host, $handle)))
 		} else {
-			[Boolean]$IsWindowVisible.Invoke($null, @([Runtime.InteropServices.HandleRef](New-Object Runtime.InteropServices.HandleRef($IsWindowVisible, $handle))))
+			$false
 		}
 	}
 }
