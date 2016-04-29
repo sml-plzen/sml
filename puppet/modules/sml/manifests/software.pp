@@ -46,7 +46,7 @@ class sml::software {
 		'gperiodic',
 		'vlc',
 		'openssh-server',
-		'google-chrome-stable',
+		#'google-chrome-stable', # no longer available for ubuntu 12.04
 		'opera',
 
 		# language packs

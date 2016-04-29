@@ -3,6 +3,7 @@ class sml::sw_repositories {
 		# register debian repos of google chrome and opera browsers
 		'ubuntu', 'debian': {
 			apt::source { 'google-chrome':
+				ensure      => absent, # google-chrome is no longer supported on this ubuntu version
 				location    => 'http://dl.google.com/linux/chrome/deb/',
 				release     => 'stable',
 				repos       => 'main',
