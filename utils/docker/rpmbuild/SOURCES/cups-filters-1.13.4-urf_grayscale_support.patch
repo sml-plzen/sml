@@ -1,0 +1,184 @@
+diff --git a/filter/urftopdf.cpp b/filter/urftopdf.cpp
+index ec3f8dc..241bfbd 100644
+--- a/filter/urftopdf.cpp
++++ b/filter/urftopdf.cpp
+@@ -275,7 +275,128 @@ struct urf_page_header {
+     uint32_t unknown3;
+ } __attribute__((__packed__));
+ 
+-int decode_raster(int fd, unsigned width, unsigned height, int bpp, struct pdf_info * info)
++// URF Colorspace support
++class PixelConverter
++{
++public:
++    static const int output_pixel_size = 3;
++    const int input_pixel_size;
++
++    PixelConverter(int size) : input_pixel_size(size)
++    {
++    }
++
++    virtual ~PixelConverter()
++    {
++    }
++
++    virtual int convert_pixel(uint8_t input_pixel[], std::vector<uint8_t> & output_pixel) = 0;
++};
++
++class RGBPixelConverter : public PixelConverter
++{
++public:
++    RGBPixelConverter() : PixelConverter(output_pixel_size)
++    {
++    }
++
++    virtual int convert_pixel(uint8_t input_pixel[], std::vector<uint8_t> & output_pixel)
++    {
++        memcpy(&output_pixel[0], &input_pixel[0], output_pixel_size);
++        return output_pixel_size;
++    }
++};
++
++class GrayscalePixelConverter : public PixelConverter
++{
++public:
++    GrayscalePixelConverter() : PixelConverter (1)
++    {
++    }
++
++    virtual int convert_pixel(uint8_t input_pixel[], std::vector<uint8_t> & output_pixel)
++    {
++        memset(&output_pixel[0], input_pixel[0], output_pixel_size);
++        return output_pixel_size;
++    }
++};
++
++PixelConverter * get_pixel_converter(urf_page_header & page_header)
++{
++    PixelConverter * pixel_converter;
++
++    if(page_header.colorspace == UNIRAST_COLOR_SPACE_SRGB_24BIT_1)
++    {
++        if(page_header.bpp != UNIRAST_BPP_24BIT)
++        {
++            die("Invalid Bit Per Pixel value, only 24bit is supported with the RGB colorspace");
++        }
++
++        pixel_converter = new RGBPixelConverter();
++    }
++    else if(page_header.colorspace == UNIRAST_COLOR_SPACE_GRAYSCALE_8BIT)
++    {
++        if(page_header.bpp != UNIRAST_BPP_8BIT)
++        {
++            die("Invalid Bit Per Pixel value, only 8bit is supported with the Grayscale colorspace");
++        }
++
++        pixel_converter = new GrayscalePixelConverter();
++    } else {
++        die("Invalid ColorSpace, only RGB 24BIT type 1 and Grayscale 8BIT are supported");
++        pixel_converter = NULL;
++        goto done;
++    }
++
++    if(pixel_converter == NULL)
++    {
++        die("Unable to allocate pixel converter");
++    }
++
++done:
++    return pixel_converter;
++}
++
++class PixelReader
++{
++protected:
++    PixelConverter * const pixel_converter;
++
++public:
++    PixelReader(urf_page_header & page_header) : pixel_converter(get_pixel_converter(page_header))
++    {
++    }
++
++    virtual ~PixelReader()
++    {
++        delete pixel_converter;
++    }
++
++    int pixel_size()
++    {
++        return pixel_converter->output_pixel_size;
++    }
++
++    int bpp()
++    {
++        return pixel_size() * 8;
++    }
++
++    int read_pixel(int fd, std::vector<uint8_t> & output_pixel)
++    {
++        int pixel_size = pixel_converter->input_pixel_size;
++        uint8_t input_pixel[pixel_size];
++
++        if(read(fd, input_pixel, pixel_size) < pixel_size)
++        {
++            return 0;
++        }
++
++        return pixel_converter->convert_pixel(input_pixel, output_pixel);
++    }
++};
++
++int decode_raster(int fd, unsigned width, unsigned height, PixelReader & pixel_reader, struct pdf_info * info)
+ {
+     // We should be at raster start
+     int i, j;
+@@ -284,7 +405,7 @@ int decode_raster(int fd, unsigned width, unsigned height, int bpp, struct pdf_i
+     uint8_t line_repeat_byte = 0;
+     unsigned line_repeat = 0;
+     int8_t packbit_code = 0;
+-    int pixel_size = (bpp/8);
++    int pixel_size = pixel_reader.pixel_size();
+     std::vector<uint8_t> pixel_container;
+     std::vector<uint8_t> line_container;
+ 
+@@ -335,7 +456,7 @@ int decode_raster(int fd, unsigned width, unsigned height, int bpp, struct pdf_i
+                 int n = (packbit_code+1);
+ 
+                 //Read pixel
+-                if(read(fd, &pixel_container[0], pixel_size) < pixel_size)
++                if(pixel_reader.read_pixel(fd, pixel_container) < pixel_size)
+                 {
+                     dprintf("p%06dl%06d : pixel repeat EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                     return 1;
+@@ -372,7 +493,7 @@ int decode_raster(int fd, unsigned width, unsigned height, int bpp, struct pdf_i
+ 
+                 for(i = 0 ; i < n ; ++i)
+                 {
+-                    if(read(fd, &pixel_container[0], pixel_size) < pixel_size)
++                    if(pixel_reader.read_pixel(fd, pixel_container) < pixel_size)
+                     {
+                         dprintf("p%06dl%06d : literal_pixel EOF at %lu\n", pos, cur_line, lseek(fd, 0, SEEK_CUR));
+                         return 1;
+@@ -476,19 +597,11 @@ int main(int argc, char **argv)
+         iprintf("Size : %dx%d pixels\n", page_header.width, page_header.height);
+         iprintf("Dots per Inches : %d\n", page_header.dot_per_inch);
+ 
+-        if(page_header.colorspace != UNIRAST_COLOR_SPACE_SRGB_24BIT_1)
+-        {
+-            die("Invalid ColorSpace, only RGB 24BIT type 1 is supported");
+-        }
+-        
+-        if(page_header.bpp != UNIRAST_BPP_24BIT)
+-        {
+-            die("Invalid Bit Per Pixel value, only 24bit is supported");
+-        }
++        PixelReader pixel_reader(page_header);
+ 
+-        if(add_pdf_page(&pdf, page, page_header.width, page_header.height, page_header.bpp, page_header.dot_per_inch) != 0) die("Unable to create PDF file");
++        if(add_pdf_page(&pdf, page, page_header.width, page_header.height, pixel_reader.bpp(), page_header.dot_per_inch) != 0) die("Unable to create PDF file");
+ 
+-        if(decode_raster(fd, page_header.width, page_header.height, page_header.bpp, &pdf) != 0)
++        if(decode_raster(fd, page_header.width, page_header.height, pixel_reader, &pdf) != 0)
+             die("Failed to decode Page");
+     }
+ 
