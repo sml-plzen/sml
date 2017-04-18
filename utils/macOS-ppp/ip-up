@@ -1,0 +1,129 @@
+#!/usr/bin/env python
+import os, sys
+import struct, socket, subprocess
+import SystemConfiguration as SC
+
+
+APP_NAME = 'pppd/ip-up'
+
+ROUTE_CMD = '/sbin/route'
+IFCONFIG_CMD = '/sbin/ifconfig'
+
+
+def get_service_routes(service_id):
+  """Returns the routes defined for the specified service id
+  in the routes.plist configuration file"""
+  preferences = SC.SCPreferencesCreate(None, APP_NAME, None)
+  network_services = SC.SCPreferencesGetValue(preferences, 'NetworkServices')
+  if network_services is None:
+    return None
+  try:
+    service = network_services[service_id]
+  except KeyError:
+    return None
+  try:
+    user_defined_name = service['UserDefinedName']
+  except KeyError:
+    return None
+  preferences = SC.SCPreferencesCreate(None, APP_NAME, 'routes.plist')
+  if preferences is None:
+    return None
+  return SC.SCPreferencesGetValue(preferences, user_defined_name)
+
+def get_class_based_network(addr):
+  """Returns the network address corresponding to specifed IP address
+   based on its class"""
+  int_addr = struct.unpack('!I', socket.inet_aton(addr))[0]
+  bitmask = 0x80000000
+  prefix = 8
+
+  while (int_addr & bitmask):
+    prefix += 8
+    bitmask = (bitmask >> 1) & 0xe0000000
+
+  netmask = -1 << (32 - prefix)
+  addr = [socket.inet_ntoa(struct.pack('!I', int_addr & netmask))]
+  if prefix < 32:
+    addr.append(socket.inet_ntoa(struct.pack('!I', netmask & 0xffffffff)))
+  return addr
+
+def get_route_options(route):
+  """Returns options to be passed to the `route` command given
+  the route definition."""
+  try:
+    return ['-host', route['host']]
+  except KeyError:
+    try:
+      network = ['-net', route['network']]
+    except KeyError:
+      return None
+    try:
+      network.extend(['-netmask', route['netmask']])
+    except KeyError:
+      pass
+    return network
+
+
+try:
+  pppd_pid = os.environ['PPPD_PID']
+except KeyError:
+  exit(0)
+
+try:
+  interface = sys.argv[1]
+except IndexError:
+  exit(0)
+
+# get the pppd's command line arguments
+try:
+  pppd_command_line = subprocess.check_output(['ps', '-ocommand=', '-wwp', pppd_pid])
+except subprocess.CalledProcessError:
+  exit(0)
+pppd_command_line = pppd_command_line.rstrip()
+if pppd_command_line == '':
+  exit(0)
+pppd_args = pppd_command_line.split()
+if pppd_args.pop(0) != 'pppd':
+  exit(0)
+
+# find out the index of the service id argument
+service_id_arg_idx = None
+for i, arg in enumerate(pppd_args):
+  if arg == 'serviceid':
+    service_id_arg_idx = i + 1
+    break
+if service_id_arg_idx is None or service_id_arg_idx >= len(pppd_args):
+  exit(0)
+
+# retrieve the routes defined for the service in the routes.plist file
+service_routes = get_service_routes(pppd_args[service_id_arg_idx])
+if service_routes is None:
+  exit(0)
+
+# delete the interface specific (RTF_IFSCOPE) default route
+# which is installed in newer versions of Mac OS X
+try:
+  remote_address = sys.argv[5]
+except IndexError:
+  remote_address = None
+if remote_address is not None:
+  subprocess.call([ROUTE_CMD, 'delete', 'default', '-ifscope', interface, remote_address])
+
+# delete the route based on the class of the local IP address
+# which is installed by Mac OS by default
+try:
+  local_address = sys.argv[4]
+except IndexError:
+  local_address = None
+if local_address is not None:
+  class_based_network = get_class_based_network(local_address)
+  if len(class_based_network) > 1:
+    subprocess.call([ROUTE_CMD,  'delete', '-net', class_based_network[0], '-netmask', class_based_network[1]])
+    if remote_address is not None:
+      subprocess.call([IFCONFIG_CMD, interface, local_address + '/32', remote_address])
+
+# install the routes
+for route in service_routes:
+  route_options = get_route_options(route)
+  if route_options is not None:
+    subprocess.call([ROUTE_CMD, 'add'] + route_options + ['-interface', interface])

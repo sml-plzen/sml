@@ -1,0 +1,7 @@
+Install the files in this directory to the following locations:
+
+/etc/ppp/ip-up
+/Library/Preferences/SystemConfiguration/routes.plist
+
+and update the definitions in routes.plist to match your network
+configuration.
