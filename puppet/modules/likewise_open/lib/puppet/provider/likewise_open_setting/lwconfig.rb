@@ -20,7 +20,7 @@ Puppet::Type.type(:likewise_open_setting).provide(:lwconfig) do
 
       command = [LWCONFIG, '--dump']
       # this will raise an exception if the command fails
-      lines = Puppet::Util.execute(command).each_line
+      lines = Puppet::Util::Execution.execute(command).each_line
       while true
         name, value = lines.next.split(/\s+/, 2)
         # TODO value should not be empty either, as that means

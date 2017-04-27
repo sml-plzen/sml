@@ -19,7 +19,10 @@ class sml {
 		incl => '/etc/puppet/puppet.conf',
 		lens => 'Puppet.lns',
 		changes => [
-			'set agent/pluginsync true',
+			# this is the default now
+			#'set agent/pluginsync true',
+			'rm agent/pluginsync',
+			'rm main/templatedir',
 		],
 		notify => Service['puppet'],
 	}
