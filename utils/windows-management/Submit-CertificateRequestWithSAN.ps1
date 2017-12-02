@@ -1,5 +1,5 @@
 # Usage:
-#   %SystemRoot%\SysWOW64\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -Command <script path>\Submit-CertificateRequestWithSAN.ps1 <CSR file> [<subject alternative name 1>,<subject alternative name 2>,...]
+#   powershell -ExecutionPolicy Bypass -Command <script path>\Submit-CertificateRequestWithSAN.ps1 <CSR file> [<subject alternative name>,...]
 # Where <subject alternative name> can be:
 #   DNS:<host name>
 #   IP:<IPv4 address>
@@ -11,47 +11,108 @@ param (
 	[String[]]$AlternativeNames = @()
 )
 
-if ([IntPtr]::Size -gt 4) {
-	# We rely on COM objects which are only available in 32bits,
-	# namely the MSScriptControl.ScriptControl.
-	Write-Error 'This script must be run with 32bit PowerShell'
-	exit 1
+function Get-COMInterfaceForObject {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Object]$COMObject,
+		[Parameter(Position = 1, Mandatory = $true)]
+		[guid]$IID
+	)
+
+	# First get hold of the IUnknown interface of the object
+	$iUnknown = [Runtime.InteropServices.Marshal]::GetIUnknownForObject($COMObject)
+
+	# Now query for the desired interface
+	$interface = [IntPtr]::Zero
+	try {
+		$hresult = [Runtime.InteropServices.Marshal]::QueryInterface($iUnknown, [ref]$IID, [ref]$interface)
+		if ($hresult -ne 0) {
+			throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+		}
+	} finally {
+		[void][Runtime.InteropServices.Marshal]::Release($iUnknown)
+	}
+
+	$interface
 }
 
-$JSCode = @'
-function callSetCertificateExtension(admin, cAConfigString, requestID, extensionOID, extensionObject) {
-	admin.SetCertificateExtension(
-		cAConfigString,
-		requestID,
-		extensionOID,
-		3, // PROPTYPE_BINARY
-		0, // not critical (EXTENSION_CRITICAL_FLAG), not disabled (EXTENSION_DISABLE_FLAG)
-		extensionObject.RawData(
-			2 // XCN_CRYPT_STRING_BINARY
-		)
+function Get-COMInterfaceMethodPointer {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[IntPtr]$COMInterface,
+		[Parameter(Position = 1, Mandatory = $true)]
+		[int]$VirtualTableSlot
+	)
+
+	[Runtime.InteropServices.Marshal]::ReadIntPtr(
+		[Runtime.InteropServices.Marshal]::ReadIntPtr($COMInterface), # virtual method table
+		[IntPtr]::Size * $VirtualTableSlot # slot offset
 	)
 }
-'@
 
-# This uses the JScript .NET compiler, but as the resulting code runs in CLR
-# (just as PowerShell itself), the same kind of marshaling (which is ultimately
-# responsible for the data corruption) still takes place (and so does the data
-# corruption).
-#$js = Add-Type -PassThru -Name 'JS' -Language JScript -MemberDefinition $JSCode | Select-Object -Last 1 | ForEach-Object {
-#	$_ = $_.GetConstructor(@())
-#
-#	$_.Invoke(@())
-#}
+function Get-DelegateType
+{
+	param (
+		[Parameter(Position = 0, Mandatory = $false)]
+		[Type]$ReturnType = [void],
+		[Parameter(Position = 1, Mandatory = $false)]
+		[Type[]]$ParameterTypes = [Type]::EmptyTypes,
+		[Parameter(Position = 2, Mandatory = $false)]
+		[Hashtable]$Marshaling = @{}
+	)
 
-# This uses the original JScript active scripting engine, which is unmanaged
-# so it doesn't need to perform the kind of marshaling PowerShell and
-# JScript .NET do, so there is no data corruption ... but it only works in
-# 32bit PowerShell as the ScriptControl COM object is only available in 32bit.
-$js = New-Object -ComObject MSScriptControl.ScriptControl | ForEach-Object {
-	$_.Language = 'JScript'
-	$_.AddCode($JSCode)
+	# Create a type builder for creating in-memory only delegate types derived from
+	# the MulticastDelegate class
+	$typeBuilder = [AppDomain]::CurrentDomain.DefineDynamicAssembly(
+		'ReflectedDelegate',
+		[Reflection.Emit.AssemblyBuilderAccess]::Run
+	).DefineDynamicModule(
+		'InMemoryModule',
+		$false
+	).DefineType(
+		'DynamicDelegateType',
+		[Reflection.TypeAttributes]::Class -bor [Reflection.TypeAttributes]::Public -bor [Reflection.TypeAttributes]::Sealed -bor [Reflection.TypeAttributes]::AutoClass,
+		[MulticastDelegate]
+	)
 
-	$_.CodeObject
+	# Define the delegate's constructor
+	$typeBuilder.DefineConstructor(
+		[Reflection.MethodAttributes]::Public -bor [Reflection.MethodAttributes]::HideBySig -bor [Reflection.MethodAttributes]::RTSpecialName,
+		[Reflection.CallingConventions]::Standard,
+		$null
+	).SetImplementationFlags(
+		[Reflection.MethodImplAttributes]::Runtime -bor [Reflection.MethodImplAttributes]::Managed
+	)
+
+	# Define the Invoke method
+	$methodBuilder = $typeBuilder.DefineMethod(
+		'Invoke',
+		[Reflection.MethodAttributes]::Public -bor [Reflection.MethodAttributes]::Virtual -bor [Reflection.MethodAttributes]::HideBySig -bor [Reflection.MethodAttributes]::NewSlot,
+		$ReturnType,
+		$ParameterTypes
+	)
+	$methodBuilder.SetImplementationFlags(
+		[Reflection.MethodImplAttributes]::Runtime -bor [Reflection.MethodImplAttributes]::Managed
+	)
+
+	# Define marshaling attributes of the Invoke method's return value & parameters
+	foreach ($entry in $Marshaling.GetEnumerator()) {
+		$methodBuilder.DefineParameter(
+			$entry.Name, # index of the parameter: 0 is the return value, 1 is the first parameter, etc.
+			[Reflection.ParameterAttributes]::HasFieldMarshal,
+			$null
+		).SetCustomAttribute(
+			[Activator]::CreateInstance(
+				[Reflection.Emit.CustomAttributeBuilder],
+				@(
+					[Runtime.InteropServices.MarshalAsAttribute].GetConstructor(@([Runtime.InteropServices.UnmanagedType])),
+					@($entry.Value)
+				)
+			)
+		)
+	}
+
+	$typeBuilder.CreateType()
 }
 
 function Get-LocalCAConfigString {
@@ -87,6 +148,111 @@ function Submit-CertificateRequest {
 	}
 
 	$requestor.GetRequestId()
+}
+
+function Call-SetCertificateExtension {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Object]$CertAdminObject,
+		[Parameter(Position = 1, Mandatory = $true)]
+		[String]$CAConfigString,
+		[Parameter(Position = 2, Mandatory = $true)]
+		[int]$RequestID,
+		[Parameter(Position = 3, Mandatory = $true)]
+		[Object]$X509ExtensionObject
+	)
+
+	# Get the IX509Extension COM interface of the X509 extension object
+	$iX509Extension = Get-COMInterfaceForObject $X509ExtensionObject '728ab30d-217d-11da-b2a4-000e7bbb2b09'
+
+	# Obtain the raw data of the X509 extension object as a BSTR through
+	# that interface
+	$x509ExtensionData_BSTR = [IntPtr]::Zero
+	try {
+		# Get a delegate for the RawData property getter
+		#
+		# HRESULT get_RawData(
+		#   [in] EncodingType Encoding,
+		#   [retval][out] BSTR *pValue
+		# );
+		$delegate = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+			(Get-COMInterfaceMethodPointer $iX509Extension 9), # the get_RawData is at slot 9 in the VTBL
+			(Get-DelegateType ([int]) @([IntPtr], [int], [IntPtr].MakeByRefType()))
+		)
+
+		# Get the raw data
+		$hresult = $delegate.Invoke(
+			$iX509Extension,
+			2, # XCN_CRYPT_STRING_BINARY
+			[ref]$x509ExtensionData_BSTR
+		)
+		if ($hresult -ne 0) {
+			throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+		}
+	} finally {
+		[void][Runtime.InteropServices.Marshal]::Release($iX509Extension)
+	}
+
+	try {
+		# Get the ICertAdmin COM interface of the cert admin object
+		$iCertAdmin = Get-COMInterfaceForObject $CertAdminObject '34df6950-7fb6-11d0-8817-00a0c903b83c'
+
+		# Call the SetCertificateExtension method on the cert admin object through
+		# that interface passing it the extension raw data in a VARIANT
+		$x509ExtensionData_VARIANT = [IntPtr]::Zero
+		try {
+			# Get a delegate for the SetCertificateExtension method
+			#
+			# HRESULT SetCertificateExtension(
+			#   [in] const BSTR strConfig,
+			#   [in]       LONG RequestId,
+			#   [in] const BSTR strExtensionName,
+			#   [in]       LONG Type,
+			#   [in]       LONG Flags,
+			#   [in] const VARIANT *pvarValue
+			# );
+			$delegate = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+				(Get-COMInterfaceMethodPointer $iCertAdmin 11), # the SetCertificateExtension is at slot 11 in the VTBL
+				(Get-DelegateType `
+					([int]) @([IntPtr], [String], [int], [String], [int], [int], [IntPtr]) `
+					@{2 = [Runtime.InteropServices.UnmanagedType]::BStr; 4 = [Runtime.InteropServices.UnmanagedType]::BStr})
+			)
+
+			# Allocate a memory chunk big enough to store a VARIANT
+			$x509ExtensionData_VARIANT = [Runtime.InteropServices.Marshal]::AllocCoTaskMem([IntPtr]::Size * 4)
+			# Initialize the VARIANT to an empty VT_BSTR
+			[Runtime.InteropServices.Marshal]::GetNativeVariantForObject(
+				# Ensure the VARIANT is of the VT_BSTR type even when we effectively pass a $null
+				[Activator]::CreateInstance([Runtime.InteropServices.BStrWrapper], @($null)),
+				$x509ExtensionData_VARIANT
+			)
+			# Set the bstrVal pointer in the VARIANT to point to the extension raw data BSTR
+			[Runtime.InteropServices.Marshal]::WriteIntPtr(
+				$x509ExtensionData_VARIANT,
+				8, # offset of the bstrVal member in the VARIANT structure
+				$x509ExtensionData_BSTR
+			)
+
+			# Call the SetCertificateExtension method
+			$hresult = $delegate.Invoke(
+				$iCertAdmin,
+				$CAConfigString,
+				$RequestID,
+				$X509ExtensionObject.ObjectId.Value,
+				3, # PROPTYPE_BINARY
+				0, # not critical (EXTENSION_CRITICAL_FLAG), not disabled (EXTENSION_DISABLE_FLAG)
+				$x509ExtensionData_VARIANT
+			)
+			if ($hresult -ne 0) {
+				throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+			}
+		} finally {
+			[void][Runtime.InteropServices.Marshal]::Release($iCertAdmin)
+			[Runtime.InteropServices.Marshal]::FreeCoTaskMem($x509ExtensionData_VARIANT)
+		}
+	} finally {
+		[Runtime.InteropServices.Marshal]::FreeBSTR($x509ExtensionData_BSTR)
+	}
 }
 
 function Check-SANPrefix {
@@ -151,13 +317,7 @@ function Set-SANCertificateExtension {
 	$altNamesExtension = New-Object -ComObject X509Enrollment.CX509ExtensionAlternativeNames
 	$altNamesExtension.InitializeEncode($altNamesCollection)
 
-	$js.callSetCertificateExtension(
-		(New-Object -ComObject CertificateAuthority.Admin),
-		$CAConfigString,
-		$RequestID,
-		'2.5.29.17',
-		$altNamesExtension
-	)
+	Call-SetCertificateExtension (New-Object -ComObject CertificateAuthority.Admin) $CAConfigString $RequestID $altNamesExtension
 }
 
 $configStr = Get-LocalCAConfigString
