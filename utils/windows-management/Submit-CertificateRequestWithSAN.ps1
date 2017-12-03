@@ -1,15 +1,21 @@
 # Usage:
-#   powershell -ExecutionPolicy Bypass -Command <script path>\Submit-CertificateRequestWithSAN.ps1 <CSR file> [<subject alternative name>,...]
+#   powershell -ExecutionPolicy Bypass -File <script path>\Submit-CertificateRequestWithSAN.ps1 <CSR file> [-Template <certificate template identifier>] [<subject alternative name> ...]
+#   powershell -ExecutionPolicy Bypass -File <script path>\Submit-CertificateRequestWithSAN.ps1 -Update <request ID> [<subject alternative name> ...]
 # Where <subject alternative name> can be:
 #   DNS:<host name>
 #   IP:<IPv4 address>
 
 param (
-	[Parameter(Position = 0, Mandatory = $true)]
-	[String]$RequestFile,
-	[Parameter(Position = 1, Mandatory = $false)]
+	[switch]$Update,
+	[Parameter(Position = 0)]
+	[String]$Request,
+	[String]$Template = 'StandardServer_V2',
+	[Parameter(ValueFromRemainingArguments = $true)]
 	[String[]]$AlternativeNames = @()
 )
+
+# Do not continue on errors
+$script:ErrorActionPreference = [Management.Automation.ActionPreference]::Stop
 
 function Get-COMInterfaceForObject {
 	param (
@@ -128,7 +134,9 @@ function Submit-CertificateRequest {
 		[Parameter(Position = 0, Mandatory = $true)]
 		[String]$CAConfigString,
 		[Parameter(Position = 1, Mandatory = $true)]
-		[String]$RequestFile
+		[String]$RequestFile,
+		[Parameter(Position = 2, Mandatory = $true)]
+		[String]$Template
 	)
 
 	$requestData = [IO.File]::ReadAllText($RequestFile)
@@ -138,13 +146,12 @@ function Submit-CertificateRequest {
 	$result = $requestor.Submit(
 		0, # CR_IN_BASE64HEADER
 		$requestData,
-		'CertificateTemplate:StandardServer_V2',
+		"CertificateTemplate:$Template",
 		$CAConfigString
 	)
 
 	if ($result -ne 5) { # CR_DISP_UNDER_SUBMISSION
-		Write-Error "Unexpected request submission result: $result"
-		exit 1
+		throw "Unexpected request submission result: $result"
 	}
 
 	$requestor.GetRequestId()
@@ -299,7 +306,7 @@ function Set-SANCertificateExtension {
 			try {
 				$ip = [Net.IPAddress] $an
 			} catch {
-				Write-Error "Invalid IP address: $an"
+				Write-Warning "Invalid IP address: $an"
 				continue
 			}
 			$ano = New-Object -ComObject X509Enrollment.CAlternativeName
@@ -310,7 +317,7 @@ function Set-SANCertificateExtension {
 			)
 			$altNamesCollection.Add($ano)
 		} else {
-			Write-Error "Unrecognized alternative name: $an"
+			Write-Warning "Unrecognized alternative name: $an"
 		}
 	}
 
@@ -320,10 +327,42 @@ function Set-SANCertificateExtension {
 	Call-SetCertificateExtension (New-Object -ComObject CertificateAuthority.Admin) $CAConfigString $RequestID $altNamesExtension
 }
 
-$configStr = Get-LocalCAConfigString
+if (-not $MyInvocation.BoundParameters.ContainsKey('Request')) {
+	if ($Update) {
+		Write-Warning 'No request ID specified, nothing to do.'
+	} else {
+		Write-Warning 'No request file specified, nothing to do.'
+	}
+	exit 2
+}
 
-$requestID = Submit-CertificateRequest $configStr $RequestFile
+if ($Update) {
+	try {
+		$requestID = [int]$Request
+	} catch {
+		throw "Request ID must be a number, not: '$Request'"
+	}
 
-if ($AlternativeNames.Count -gt 0) {
+	if ($AlternativeNames.Count -eq 0) {
+		Write-Warning 'No subject alternative names specified, nothing to do.'
+		exit 2
+	}
+
+	if ($MyInvocation.BoundParameters.ContainsKey('Template')) {
+		Write-Warning 'Template cannot be changed during an update, it is ignored.'
+	}
+
+	$configStr = Get-LocalCAConfigString
+
 	Set-SANCertificateExtension $configStr $requestID $AlternativeNames
+} else {
+	$configStr = Get-LocalCAConfigString
+
+	$requestID = Submit-CertificateRequest $configStr $Request $Template
+
+	Write-Output @{RequestID = $requestID}
+
+	if ($AlternativeNames.Count -gt 0) {
+		Set-SANCertificateExtension $configStr $requestID $AlternativeNames
+	}
 }
