@@ -143,15 +143,15 @@ function Submit-CertificateRequest {
 
 	$requestor = New-Object -ComObject CertificateAuthority.Request
 
-	$result = $requestor.Submit(
+	$disposition = $requestor.Submit(
 		0, # CR_IN_BASE64HEADER
 		$requestData,
 		"CertificateTemplate:$Template",
 		$CAConfigString
 	)
 
-	if ($result -ne 5) { # CR_DISP_UNDER_SUBMISSION
-		throw "Unexpected request submission result: $result"
+	if ($disposition -eq 0 -or $disposition -eq 1 -or $disposition -eq 2) { # CR_DISP_INCOMPLETE or CR_DISP_ERROR or CR_DISP_DENIED
+		throw "Request submission failed with disposition: $disposition"
 	}
 
 	$requestor.GetRequestId()
@@ -166,7 +166,9 @@ function Call-SetCertificateExtension {
 		[Parameter(Position = 2, Mandatory = $true)]
 		[int]$RequestID,
 		[Parameter(Position = 3, Mandatory = $true)]
-		[Object]$X509ExtensionObject
+		[Object]$X509ExtensionObject,
+		[Parameter(Position = 4, Mandatory = $false)]
+		[bool]$Disable = $false
 	)
 
 	# Get the IX509Extension COM interface of the X509 extension object
@@ -225,6 +227,14 @@ function Call-SetCertificateExtension {
 					@{2 = [Runtime.InteropServices.UnmanagedType]::BStr; 4 = [Runtime.InteropServices.UnmanagedType]::BStr})
 			)
 
+			$flags = 0
+			if ($X509ExtensionObject.Critical) {
+				$flags = $flags -bor 1 # EXTENSION_CRITICAL_FLAG
+			}
+			if ($Disable) {
+				$flags = $flags -bor 2 # EXTENSION_DISABLE_FLAG
+			}
+
 			# Allocate a memory chunk big enough to store a VARIANT
 			$x509ExtensionData_VARIANT = [Runtime.InteropServices.Marshal]::AllocCoTaskMem([IntPtr]::Size * 4)
 			# Initialize the VARIANT to an empty VT_BSTR
@@ -247,7 +257,7 @@ function Call-SetCertificateExtension {
 				$RequestID,
 				$X509ExtensionObject.ObjectId.Value,
 				3, # PROPTYPE_BINARY
-				0, # not critical (EXTENSION_CRITICAL_FLAG), not disabled (EXTENSION_DISABLE_FLAG)
+				$flags,
 				$x509ExtensionData_VARIANT
 			)
 			if ($hresult -ne 0) {
@@ -288,6 +298,7 @@ function Set-SANCertificateExtension {
 		[Parameter(Position = 1, Mandatory = $true)]
 		[int]$RequestID,
 		[Parameter(Position = 2, Mandatory = $true)]
+		[AllowEmptyCollection()]
 		[String[]]$AlternativeNames
 	)
 
@@ -322,9 +333,25 @@ function Set-SANCertificateExtension {
 	}
 
 	$altNamesExtension = New-Object -ComObject X509Enrollment.CX509ExtensionAlternativeNames
-	$altNamesExtension.InitializeEncode($altNamesCollection)
+	if ($altNamesCollection.Count -gt 0) {
+		$altNamesExtension.InitializeEncode($altNamesCollection)
+	} else {
+		# When there were no recognized alternative names specified, initialize
+		# the extension in an alternative way from an empty DER encoded ASN.1
+		# sequence (a sequence of bytes 0x30, 0x00) as the extension refuses to
+		# initialize from an empty alternative names collection.
+		$altNamesExtension.InitializeDecode(
+			1, # XCN_CRYPT_STRING_BASE64
+			[Convert]::ToBase64String(@(0x30, 0x00)) # empty DER sequence
+		)
+	}
 
-	Call-SetCertificateExtension (New-Object -ComObject CertificateAuthority.Admin) $CAConfigString $RequestID $altNamesExtension
+	Call-SetCertificateExtension `
+		(New-Object -ComObject CertificateAuthority.Admin) `
+		$CAConfigString `
+		$RequestID `
+		$altNamesExtension `
+		($AlternativeNames.Count -eq 0)
 }
 
 if (-not $MyInvocation.BoundParameters.ContainsKey('Request')) {
@@ -341,11 +368,6 @@ if ($Update) {
 		$requestID = [int]$Request
 	} catch {
 		throw "Request ID must be a number, not: '$Request'"
-	}
-
-	if ($AlternativeNames.Count -eq 0) {
-		Write-Warning 'No subject alternative names specified, nothing to do.'
-		exit 2
 	}
 
 	if ($MyInvocation.BoundParameters.ContainsKey('Template')) {
