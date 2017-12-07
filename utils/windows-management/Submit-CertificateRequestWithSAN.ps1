@@ -56,6 +56,80 @@ function Get-COMInterfaceMethodPointer {
 	)
 }
 
+function New-TypeRegistry {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Reflection.Emit.ModuleBuilder]$ModuleBuilder
+	)
+
+	$typeMap = @{}
+
+	New-Object -TypeName PSObject |`
+		Add-Member -MemberType ScriptProperty -Name ModuleBuilder -Value {
+			param ()
+
+			$ModuleBuilder
+		}.GetNewClosure() -PassThru |`
+		Add-Member -MemberType ScriptMethod -Name GetRegisteredType -Value {
+			param (
+				[Parameter(Position = 0, Mandatory = $true)]
+				[String]$key
+			)
+
+			$typeMap[$key]
+		}.GetNewClosure() -PassThru |`
+		Add-Member -MemberType ScriptMethod -Name RegisterType -Value {
+			param (
+				[Parameter(Position = 0, Mandatory = $true)]
+				[String]$key,
+				[Parameter(Position = 1, Mandatory = $true)]
+				[Type]$type
+			)
+
+			($typeMap[$key] = $type) # need parentheses around the assignment to return a value
+		}.GetNewClosure() -PassThru
+}
+
+function Get-TypeRegistryForDynamicAssembly {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[String]$AssemblyName
+	)
+
+	$key = "TypeRegistry:$AssemblyName"
+
+	# If the type registry for the specified assembly name is already
+	# registered in the app domain data then simply return it
+	$appDomain = [AppDomain]::CurrentDomain
+	$registry = $appDomain.GetData($key)
+	if ($registry -ne $null) {
+		$moduleBuilder = $registry.ModuleBuilder
+		if ($moduleBuilder -is [Reflection.Emit.ModuleBuilder]) {
+			if ($moduleBuilder.Assembly.GetName().Name.Equals($AssemblyName)) {
+				return $registry
+			}
+		}
+	}
+
+	# Create a new module builder in a new dynamic assembly
+	$moduleBuilder = $appDomain.DefineDynamicAssembly(
+		$AssemblyName,
+		[Reflection.Emit.AssemblyBuilderAccess]::Run
+	).DefineDynamicModule(
+		'InMemoryModule',
+		$false
+	)
+
+	# Create a new type registry with the new module builder
+	$registry = New-TypeRegistry $moduleBuilder
+
+	# Register the type registry for the specified dynamic assembly
+	# name in the app domain data
+	$appDomain.SetData($key, $registry)
+
+	$registry
+}
+
 function Get-DelegateType
 {
 	param (
@@ -67,16 +141,35 @@ function Get-DelegateType
 		[Hashtable]$Marshaling = @{}
 	)
 
-	# Create a type builder for creating in-memory only delegate types derived from
-	# the MulticastDelegate class
-	$typeBuilder = [AppDomain]::CurrentDomain.DefineDynamicAssembly(
-		'ReflectedDelegate',
-		[Reflection.Emit.AssemblyBuilderAccess]::Run
-	).DefineDynamicModule(
-		'InMemoryModule',
-		$false
-	).DefineType(
-		'DynamicDelegateType',
+	# Get the type registry for the dynamic delegates assembly
+	$registry = Get-TypeRegistryForDynamicAssembly 'ReflectedDynamicDelegates'
+
+	# Build a unique key for the delegate type
+	$key = "ReflectedDelegate`0$($ReturnType.FullName)"
+	if ($Marshaling.ContainsKey(0)) {
+		$key += "=>$($Marshaling[0])"
+	}
+	for ($parameterIndex = 0; $parameterIndex -lt $ParameterTypes.Count;) {
+		$key += "`0$($ParameterTypes[$parameterIndex++].FullName)"
+		if ($Marshaling.ContainsKey($parameterIndex)) {
+			$key += "=>$($Marshaling[$parameterIndex])"
+		}
+	}
+
+	# If the type is already registered then simply return it
+	$delegateType = $registry.GetRegisteredType($key)
+	if ($delegateType -ne $null) {
+		return $delegateType
+	}
+
+	# Turn the key into a namespaced type name
+	$typeName = ([regex]"`0").Replace($key.Replace('.', '::'), '.', 1).Replace("`0", ';')
+	# Append a GUID to make the type name unique
+	$typeName = "$typeName;$([guid]::NewGuid())"
+
+	# Define the desired delegate type deriving it from the MulticastDelegate class
+	$typeBuilder = $registry.ModuleBuilder.DefineType(
+		$typeName,
 		[Reflection.TypeAttributes]::Class -bor [Reflection.TypeAttributes]::Public -bor [Reflection.TypeAttributes]::Sealed -bor [Reflection.TypeAttributes]::AutoClass,
 		[MulticastDelegate]
 	)
@@ -118,7 +211,8 @@ function Get-DelegateType
 		)
 	}
 
-	$typeBuilder.CreateType()
+	# Create the delegate type & register it
+	$registry.RegisterType($key, $typeBuilder.CreateType())
 }
 
 function Get-LocalCAConfigString {
