@@ -33,7 +33,7 @@ function Get-COMInterfaceForObject {
 	try {
 		$hresult = [Runtime.InteropServices.Marshal]::QueryInterface($iUnknown, [ref]$IID, [ref]$interface)
 		if ($hresult -ne 0) {
-			throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+			Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
 		}
 	} finally {
 		[void][Runtime.InteropServices.Marshal]::Release($iUnknown)
@@ -245,7 +245,7 @@ function Submit-CertificateRequest {
 	)
 
 	if ($disposition -eq 0 -or $disposition -eq 1 -or $disposition -eq 2) { # CR_DISP_INCOMPLETE or CR_DISP_ERROR or CR_DISP_DENIED
-		throw "Request submission failed with disposition: $disposition"
+		Write-Error -Exception ([Management.Automation.RuntimeException]"Request submission failed with disposition: $disposition")
 	}
 
 	$requestor.GetRequestId()
@@ -290,7 +290,7 @@ function Call-SetCertificateExtension {
 			[ref]$x509ExtensionData_BSTR
 		)
 		if ($hresult -ne 0) {
-			throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+			Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
 		}
 	} finally {
 		[void][Runtime.InteropServices.Marshal]::Release($iX509Extension)
@@ -355,7 +355,7 @@ function Call-SetCertificateExtension {
 				$x509ExtensionData_VARIANT
 			)
 			if ($hresult -ne 0) {
-				throw [Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero)
+				Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
 			}
 		} finally {
 			[void][Runtime.InteropServices.Marshal]::Release($iCertAdmin)
@@ -448,6 +448,44 @@ function Set-SANCertificateExtension {
 		($AlternativeNames.Count -eq 0)
 }
 
+function Format-ErrorRecord {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[Management.Automation.ErrorRecord]$ErrorRecord,
+		[switch]$Detailed
+	)
+
+	$message = ''
+	if ($Detailed -or -not $ErrorRecord.PSObject.Properties['ScriptStackTrace']) {
+		$message += '-- Error Record '.PadRight(80, '-') + "`n"
+		$message += $ErrorRecord | Format-List * -Force | Out-String
+
+		$message += '-- Invocation Info '.PadRight(80, '-') + "`n"
+		$message += $ErrorRecord.InvocationInfo | Format-List * | Out-String
+
+		$exception = $ErrorRecord.Exception
+		for ($i = 0; $exception; ++$i, ($exception = $exception.InnerException)) {
+			$message += "-- Exception $i ".PadRight(80, '-') + "`n"
+			# Need to grab the pass through object as the original
+			# doesn't have the property appended in PowerShell 2.
+			$exception = Add-Member -InputObject $exception -MemberType NoteProperty `
+				-Name Type -Value ($exception.GetType().FullName) `
+				-PassThru
+			$message += $exception | Format-List * -Force | Out-String
+		}
+	} else {
+		$exception = $ErrorRecord.Exception
+		while ($exception.InnerException -ne $null) {
+			$exception = $exception.InnerException
+		}
+		$message +=
+			$exception.GetType().FullName + ': ' + $exception.Message +
+			("`n" + $ErrorRecord.ScriptStackTrace).Replace("`n", "`n$(' '*8)")
+	}
+
+	$message
+}
+
 if (-not $MyInvocation.BoundParameters.ContainsKey('Request')) {
 	if ($Update) {
 		Write-Warning 'No request ID specified, nothing to do.'
@@ -457,28 +495,33 @@ if (-not $MyInvocation.BoundParameters.ContainsKey('Request')) {
 	exit 2
 }
 
-if ($Update) {
-	try {
-		$requestID = [int]$Request
-	} catch {
-		throw "Request ID must be a number, not: '$Request'"
-	}
+try {
+	if ($Update) {
+		try {
+			$requestID = [int]$Request
+		} catch {
+			Write-Error -Exception ([ArgumentException]"Request ID must be a number, not: '$Request'")
+		}
 
-	if ($MyInvocation.BoundParameters.ContainsKey('Template')) {
-		Write-Warning 'Template cannot be changed during an update, it is ignored.'
-	}
+		if ($MyInvocation.BoundParameters.ContainsKey('Template')) {
+			Write-Warning 'Template cannot be changed during an update, it is ignored.'
+		}
 
-	$configStr = Get-LocalCAConfigString
+		$configStr = Get-LocalCAConfigString
 
-	Set-SANCertificateExtension $configStr $requestID $AlternativeNames
-} else {
-	$configStr = Get-LocalCAConfigString
-
-	$requestID = Submit-CertificateRequest $configStr $Request $Template
-
-	Write-Output @{RequestID = $requestID}
-
-	if ($AlternativeNames.Count -gt 0) {
 		Set-SANCertificateExtension $configStr $requestID $AlternativeNames
+	} else {
+		$configStr = Get-LocalCAConfigString
+
+		$requestID = Submit-CertificateRequest $configStr $Request $Template
+
+		Write-Output @{RequestID = $requestID}
+
+		if ($AlternativeNames.Count -gt 0) {
+			Set-SANCertificateExtension $configStr $requestID $AlternativeNames
+		}
 	}
+} catch {
+	$Host.UI.WriteErrorLine((Format-ErrorRecord $_ -Detailed:$false))
+	exit 1
 }
