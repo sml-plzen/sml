@@ -16,17 +16,13 @@ class sml::sw_repositories {
 				location    => 'http://deb.opera.com/opera/',
 				release     => 'stable',
 				repos       => 'non-free',
-				key         => 'F6D61D45',
+				key         => 'A5C7FF72',
 				key_server  => 'keys.gnupg.net',
 				include_src => false,
 			}
 
 			# Remove old Opera keys
-			apt::key { '30C18A2B':
-				ensure      => absent,
-				key_server  => 'keys.gnupg.net',
-			}
-			apt::key { 'A8492E35':
+			apt::key { ['30C18A2B', 'A8492E35', 'F6D61D45']:
 				ensure      => absent,
 				key_server  => 'keys.gnupg.net',
 			}
