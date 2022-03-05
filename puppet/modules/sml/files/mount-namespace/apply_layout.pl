@@ -114,11 +114,6 @@ use Unix::Syslog;
 	}
 
 	sub init($) {
-		my ($self) = @_;
-
-		# change the SELinux context of the mount root directory to allow access from the sshd chroot environment
-		system(qw( /usr/bin/chcon unconfined_u:object_r:user_home_dir_t:s0 ), $$self{MOUNT_ROOT}) == 0
-			or main::log_and_die("Failed to change SELinux label of $$self{MOUNT_ROOT} to unconfined_u:object_r:user_home_dir_t:s0");
 	}
 
 	sub mount_device($$$) {
@@ -339,14 +334,26 @@ sub read_layouts($$) {
 	my $layoutsFile = sprintf('//%s/netlogon/layouts.xml', $ldap->host());
 	my $fh = gensym(); # create an anonymous filehandle
 
-	# open the layouts definition file at the NETLOGON share through a tie to Filesys::SmbClient
-	tie(*{$fh}, 'Filesys::SmbClient',
-		"smb:$layoutsFile",
-		undef,
-		username => $user,
-		flags => SMB_CTX_FLAG_USE_KERBEROS | SMBCCTX_FLAG_NO_AUTO_ANONYMOUS_LOGON,
-	)
+	do {
+		# override the HOME directory to point to the directory where this
+		# script is located, the expectation is that that directory contains
+		# the ``.smb'' subdirectory which in turns contains a smb.conf file
+		# to be used by the ``Filesys::SmbClient''; some versions of the
+		# module create an empty smb.conf file otherwise (that is if the
+		# $HOME/.smb/smb.conf does not exist) which causes an authentication
+		# problem when trying to access the layouts.xml file
+		local $ENV{HOME} = dirname(File::Spec->rel2abs($0));
+
+		# open the layouts definition file at the NETLOGON share through a tie to Filesys::SmbClient
+		tie(*{$fh}, 'Filesys::SmbClient',
+			"smb:$layoutsFile",
+			undef,
+			username => $user,
+			flags => SMB_CTX_FLAG_USE_KERBEROS | SMBCCTX_FLAG_NO_AUTO_ANONYMOUS_LOGON,
+		)
+	}
 		or log_and_die("Failed to open layouts definition file ($layoutsFile): $!");
+
 	# read the raw XML data
 	my $xml = eval { XMLin($fh, KeyAttr => {}, ForceArray => [ qw( layout include volume apply account ) ], KeepRoot => 1) };
 	if ($@) {
