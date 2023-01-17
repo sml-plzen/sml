@@ -117,6 +117,7 @@ use constant MOUNT_POINT => '/mnt';
 		my ($self, $files) = @_;
 
 		main::execute(qw(omxplayer), @$files);
+		#main::execute(qw(su presenter -s /usr/bin/vlc -- -I dummy), @$files, 'vlc://quit');
 	}
 }
 
@@ -423,6 +424,10 @@ sub execute(@) {
 			or POSIX::_exit(127);
 		close($wh);
 		open(STDOUT, '>', '/dev/null');
+		if (ref($_[0]) eq 'HASH') {
+			my $env = shift(@_);
+			@ENV{keys(%$env)} = values(%$env);
+		}
 		exec({$_[0]} @_)
 			or POSIX::_exit(127);
 	} else {
@@ -493,7 +498,8 @@ while (1) {
 	}
 
 	unless (is_mounted($mount_point)) {
-		execute(qw(/bin/mount -t cifs -o sec=krb5), $share, $mount_point)
+		no warnings qw(qw);
+		execute(qw(/bin/mount -t cifs -o sec=krb5,dir_mode=0755,file_mode=0644), $share, $mount_point)
 			or log_and_wait(ERROR_WAIT_TIME, 'Failed to mount share: ', $share, ': ', $@), next;
 		$media = undef;
 	}
