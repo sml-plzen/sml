@@ -59,14 +59,14 @@ use constant MOUNT_POINT => '/mnt';
 
 		unless ($plymouth_deactivated) {
 			$plymouth_deactivated = 1;
-			main::execute(qw(/bin/plymouth deactivate));
+			#main::execute(qw(/bin/plymouth deactivate));
 		}
 
 		$self->do_present(\@files);
 
 		if ($plymouth_deactivated) {
 			$plymouth_deactivated = 0;
-			main::execute(qw(/bin/plymouth reactivate));
+			#main::execute(qw(/bin/plymouth reactivate));
 		}
 
 		# no need to rescan if no files were removed
