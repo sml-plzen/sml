@@ -12,7 +12,7 @@ use Config qw(%Config);
 use constant IMAGE_DISPLAY_TIME => 6;
 use constant MEDIA_RESCAN_TIME => 120;
 
-use constant ERROR_WAIT_TIME => 300;
+use constant ERROR_WAIT_TIME => 60;
 
 use constant CRED_VALID_TIME => 3600;
 
