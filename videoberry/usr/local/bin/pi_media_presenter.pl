@@ -417,7 +417,7 @@ sub execute(@) {
 
 	if ($child == 0) {
 		# child
-		$SIG{'INT'} = $SIG{'QUIT'} = $SIG{'TERM'} = 'DEFAULT';
+		$SIG{'INT'} = $SIG{'QUIT'} = $SIG{'TERM'} = $SIG{'HUP'} = 'DEFAULT';
 
 		close($rh);
 		open(STDERR, '>&', $wh)
@@ -460,7 +460,7 @@ sub forward_signal($) {
 # main Main MAIN
 $myname = basename($0);
 
-$SIG{'INT'} = $SIG{'QUIT'} = $SIG{'TERM'} = \&forward_signal;
+$SIG{'INT'} = $SIG{'QUIT'} = $SIG{'TERM'} = $SIG{'HUP'} = \&forward_signal;
 
 (@ARGV == 1)
 	or log_message('Expected 1 parameter: <UNC path>, got: ', join(' ', map('<' . $_ . '>', @ARGV))), exit(1);
@@ -500,7 +500,7 @@ while (1) {
 	unless (is_mounted($mount_point)) {
 		no warnings qw(qw);
 		execute(qw(/bin/mount -t cifs -o sec=krb5,dir_mode=0755,file_mode=0644), $share, $mount_point)
-			or log_and_wait(ERROR_WAIT_TIME, 'Failed to mount share: ', $share, ': ', $@), next;
+			or $cc->destroy(), log_and_wait(ERROR_WAIT_TIME, 'Failed to mount share: ', $share, ': ', $@), next;
 		$media = undef;
 	}
 
@@ -573,6 +573,7 @@ while (1) {
 END {
 	(defined($mount_point) && is_mounted($mount_point))
 		and execute(qw(/bin/umount), $mount_point);
+	$cc->destroy();
 	# reactivate plymouth
 	Presenter->present();
 }
