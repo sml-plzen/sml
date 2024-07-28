@@ -52,7 +52,7 @@ function Get-COMInterfaceMethodPointer {
 
 	[Runtime.InteropServices.Marshal]::ReadIntPtr(
 		[Runtime.InteropServices.Marshal]::ReadIntPtr($COMInterface), # virtual method table
-		[IntPtr]::Size * $VirtualTableSlot # slot offset
+		$VirtualTableSlot * [IntPtr]::Size # slot offset
 	)
 }
 
@@ -201,13 +201,10 @@ function Get-DelegateType
 			[Reflection.ParameterAttributes]::HasFieldMarshal,
 			$null
 		).SetCustomAttribute(
-			[Activator]::CreateInstance(
-				[Reflection.Emit.CustomAttributeBuilder],
-				@(
-					[Runtime.InteropServices.MarshalAsAttribute].GetConstructor(@([Runtime.InteropServices.UnmanagedType])),
-					@($entry.Value)
-				)
-			)
+			(New-Object Reflection.Emit.CustomAttributeBuilder(
+				[Runtime.InteropServices.MarshalAsAttribute].GetConstructor(@([Runtime.InteropServices.UnmanagedType])),
+				@($entry.Value)
+			))
 		)
 	}
 
@@ -330,17 +327,17 @@ function Call-SetCertificateExtension {
 			}
 
 			# Allocate a memory chunk big enough to store a VARIANT
-			$x509ExtensionData_VARIANT = [Runtime.InteropServices.Marshal]::AllocCoTaskMem([IntPtr]::Size * 4)
+			$x509ExtensionData_VARIANT = [Runtime.InteropServices.Marshal]::AllocCoTaskMem(4 * 2 + 2 * [IntPtr]::Size)
 			# Initialize the VARIANT to an empty VT_BSTR
 			[Runtime.InteropServices.Marshal]::GetNativeVariantForObject(
 				# Ensure the VARIANT is of the VT_BSTR type even when we effectively pass a $null
-				[Activator]::CreateInstance([Runtime.InteropServices.BStrWrapper], @($null)),
+				(New-Object Runtime.InteropServices.BStrWrapper(@($null))),
 				$x509ExtensionData_VARIANT
 			)
 			# Set the bstrVal pointer in the VARIANT to point to the extension raw data BSTR
 			[Runtime.InteropServices.Marshal]::WriteIntPtr(
 				$x509ExtensionData_VARIANT,
-				8, # offset of the bstrVal member in the VARIANT structure
+				4 * 2, # offset of the bstrVal member in the VARIANT structure
 				$x509ExtensionData_BSTR
 			)
 
