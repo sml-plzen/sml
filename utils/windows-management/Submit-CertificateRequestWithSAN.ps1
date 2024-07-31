@@ -56,6 +56,68 @@ function Get-COMInterfaceMethodPointer {
 	)
 }
 
+function Get-TyepForIDispatch {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[IntPtr]$IDispatch
+	)
+
+	# Get a delegate for the GetTypeInfoCount method
+	#
+	# HRESULT GetTypeInfoCount(
+	#   [out] UINT *pctinfo
+	# );
+	$GetTypeInfoCount = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+		(Get-COMInterfaceMethodPointer $IDispatch 3), # the GetTypeInfoCount is at slot 3 in the VTBL
+		(Get-DelegateType ([int]) @([IntPtr], [uint32].MakeByRefType()))
+	)
+
+	[uint32]$count = 0
+	$hresult = $GetTypeInfoCount.Invoke($iDispatch, [ref]$count)
+	if ($hresult -ne 0) {
+		Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
+	}
+	if ($count -le 0) {
+		Write-Error -Exception ([ArgumentException]'COM object does not provide type information')
+	}
+
+	# Get a delegate for the GetTypeInfo method
+	#
+	# HRESULT GetTypeInfo(
+	#   [in]  UINT      iTInfo,
+	#   [in]  LCID      lcid,
+	#   [out] ITypeInfo **ppTInfo
+	# );
+	$GetTypeInfo = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+		(Get-COMInterfaceMethodPointer $IDispatch 4), # the GetTypeInfo is at slot 4 in the VTBL
+		(Get-DelegateType ([int]) @([IntPtr], [uint32], [uint32], [IntPtr].MakeByRefType()))
+	)
+
+	$typeInfo = [IntPtr]::Zero
+	$hresult = $GetTypeInfo.Invoke($iDispatch, 0, 0, [ref]$typeInfo)
+	if ($hresult -ne 0) {
+		Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
+	}
+
+	[Runtime.InteropServices.Marshal]::GetTypeForITypeInfo($typeInfo)
+}
+
+function Get-IDispatchMethodPointer {
+	param (
+		[Parameter(Position = 0, Mandatory = $true)]
+		[IntPtr]$IDispatch,
+		[Parameter(Position = 1, Mandatory = $true)]
+		[String]$MethodName
+	)
+
+	$methodInfo = (Get-TyepForIDispatch $IDispatch).GetMethod($MethodName)
+	if ($methodInfo -eq $null) {
+		Write-Error -Exception ([ArgumentException]"Method not found: $MethodName")
+	}
+
+	Get-COMInterfaceMethodPointer $IDispatch ([Runtime.InteropServices.Marshal]::GetComSlotForMethodInfo($methodInfo))
+}
+
 function New-TypeRegistry {
 	param (
 		[Parameter(Position = 0, Mandatory = $true)]
@@ -262,11 +324,10 @@ function Call-SetCertificateExtension {
 		[bool]$Disable = $false
 	)
 
-	# Get the IX509Extension COM interface of the X509 extension object
-	$iX509Extension = Get-COMInterfaceForObject $X509ExtensionObject '728ab30d-217d-11da-b2a4-000e7bbb2b09'
+	# Get the IDispatch COM interface of the X509 extension object
+	$x509ExtensionIDispatch = [Runtime.InteropServices.Marshal]::GetIDispatchForObject($X509ExtensionObject)
 
-	# Obtain the raw data of the X509 extension object as a BSTR through
-	# that interface
+	# Obtain the raw data of the X509 extension object as a BSTR through the RawData property
 	$x509ExtensionData_BSTR = [IntPtr]::Zero
 	try {
 		# Get a delegate for the RawData property getter
@@ -275,14 +336,14 @@ function Call-SetCertificateExtension {
 		#   [in] EncodingType Encoding,
 		#   [retval][out] BSTR *pValue
 		# );
-		$delegate = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
-			(Get-COMInterfaceMethodPointer $iX509Extension 9), # the get_RawData is at slot 9 in the VTBL
+		$get_RawData = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+			(Get-IDispatchMethodPointer $x509ExtensionIDispatch 'get_RawData'),
 			(Get-DelegateType ([int]) @([IntPtr], [int], [IntPtr].MakeByRefType()))
 		)
 
 		# Get the raw data
-		$hresult = $delegate.Invoke(
-			$iX509Extension,
+		$hresult = $get_RawData.Invoke(
+			$x509ExtensionIDispatch,
 			2, # XCN_CRYPT_STRING_BINARY
 			[ref]$x509ExtensionData_BSTR
 		)
@@ -290,12 +351,12 @@ function Call-SetCertificateExtension {
 			Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
 		}
 	} finally {
-		[void][Runtime.InteropServices.Marshal]::Release($iX509Extension)
+		[void][Runtime.InteropServices.Marshal]::Release($x509ExtensionIDispatch)
 	}
 
 	try {
-		# Get the ICertAdmin COM interface of the cert admin object
-		$iCertAdmin = Get-COMInterfaceForObject $CertAdminObject '34df6950-7fb6-11d0-8817-00a0c903b83c'
+		# Get the IDispatch COM interface of the cert admin object
+		$certAdminIDispatch = [Runtime.InteropServices.Marshal]::GetIDispatchForObject($CertAdminObject)
 
 		# Call the SetCertificateExtension method on the cert admin object through
 		# that interface passing it the extension raw data in a VARIANT
@@ -311,8 +372,8 @@ function Call-SetCertificateExtension {
 			#   [in]       LONG Flags,
 			#   [in] const VARIANT *pvarValue
 			# );
-			$delegate = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
-				(Get-COMInterfaceMethodPointer $iCertAdmin 11), # the SetCertificateExtension is at slot 11 in the VTBL
+			$SetCertificateExtension = [Runtime.InteropServices.Marshal]::GetDelegateForFunctionPointer(
+				(Get-IDispatchMethodPointer $certAdminIDispatch 'SetCertificateExtension'),
 				(Get-DelegateType `
 					([int]) @([IntPtr], [String], [int], [String], [int], [int], [IntPtr]) `
 					@{2 = [Runtime.InteropServices.UnmanagedType]::BStr; 4 = [Runtime.InteropServices.UnmanagedType]::BStr})
@@ -342,8 +403,8 @@ function Call-SetCertificateExtension {
 			)
 
 			# Call the SetCertificateExtension method
-			$hresult = $delegate.Invoke(
-				$iCertAdmin,
+			$hresult = $SetCertificateExtension.Invoke(
+				$certAdminIDispatch,
 				$CAConfigString,
 				$RequestID,
 				$X509ExtensionObject.ObjectId.Value,
@@ -355,7 +416,7 @@ function Call-SetCertificateExtension {
 				Write-Error -Exception ([Runtime.InteropServices.Marshal]::GetExceptionForHR($hresult, [IntPtr]::Zero))
 			}
 		} finally {
-			[void][Runtime.InteropServices.Marshal]::Release($iCertAdmin)
+			[void][Runtime.InteropServices.Marshal]::Release($certAdminIDispatch)
 			[Runtime.InteropServices.Marshal]::FreeCoTaskMem($x509ExtensionData_VARIANT)
 		}
 	} finally {
